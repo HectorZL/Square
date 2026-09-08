@@ -103,13 +103,17 @@ class MediaBrowseTree(
         player: androidx.media3.common.Player,
         /**
          * The shade has room for two buttons beside the transport and is looked
-         * at rather than operated: repeat is a setting people change once,
-         * while radio is a thing to do with the song on screen. The car keeps
-         * repeat, because there it is the mode a driver actually reaches for.
+         * at rather than operated: the shade shows a heart to add to Liked Songs
+         * (Tus me gusta) instead of repeat, which is a setting people change once.
+         * The car keeps repeat, because there it is the mode a driver actually reaches for.
          */
         radioInsteadOfRepeat: Boolean = false,
-    ): ImmutableList<CommandButton> =
-        ImmutableList.of(
+        isLiked: Boolean? = null,
+    ): ImmutableList<CommandButton> {
+        val currentUri = player.currentMediaItem?.mediaId
+        val liked = isLiked ?: app.likedStore.isLiked(currentUri)
+
+        return ImmutableList.of(
             CommandButton.Builder(
                 if (player.shuffleModeEnabled) {
                     CommandButton.ICON_SHUFFLE_ON
@@ -121,9 +125,12 @@ class MediaBrowseTree(
                 .setDisplayName(strings.getString(R.string.shuffle))
                 .build(),
             if (radioInsteadOfRepeat) {
-                CommandButton.Builder(CommandButton.ICON_RADIO)
-                    .setSessionCommand(SessionCommand(CMD_RADIO, Bundle.EMPTY))
-                    .setDisplayName(strings.getString(R.string.radio))
+                CommandButton.Builder()
+                    .setIconResId(if (liked) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline)
+                    .setSessionCommand(SessionCommand(CMD_LIKE, Bundle.EMPTY))
+                    .setDisplayName(
+                        strings.getString(if (liked) R.string.remove_from_liked else R.string.liked_songs),
+                    )
                     .build()
             } else {
                 CommandButton.Builder(
@@ -140,6 +147,7 @@ class MediaBrowseTree(
                     .build()
             },
         )
+    }
 
     override fun onConnect(
         session: MediaSession,
@@ -150,6 +158,7 @@ class MediaBrowseTree(
             .add(SessionCommand(CMD_SHUFFLE, Bundle.EMPTY))
             .add(SessionCommand(CMD_REPEAT, Bundle.EMPTY))
             .add(SessionCommand(CMD_RADIO, Bundle.EMPTY))
+            .add(SessionCommand(CMD_LIKE, Bundle.EMPTY))
             .build()
 
         return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
@@ -183,15 +192,81 @@ class MediaBrowseTree(
                 startRadio(session)
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
+            CMD_LIKE -> {
+                toggleLike(session)
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
 
             else -> return Futures.immediateFuture(
                 SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED),
             )
         }
-        // Redrawn at once. The button carries the state, so a press that left
-        // the old icon up read as a press that had not landed.
-        session.setCustomLayout(layoutFor(player))
+        // Redrawn at once on each controller so their layouts (car vs shade) remain distinct.
+        session.connectedControllers.forEach { ctrl ->
+            session.setCustomLayout(
+                ctrl,
+                layoutFor(
+                    player,
+                    radioInsteadOfRepeat = session.isMediaNotificationController(ctrl),
+                ),
+            )
+        }
         return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+    }
+
+    private fun toggleLike(session: MediaSession) {
+        val player = session.player
+        val uri = player.currentMediaItem?.mediaId ?: return
+        if (!uri.startsWith("spotify:track:")) return
+
+        val nowLiked = app.likedStore.toggle(uri)
+        val id = uri.substringAfterLast(':')
+
+        // Redraw immediately on all connected controllers so the heart flips without latency
+        session.connectedControllers.forEach { ctrl ->
+            session.setCustomLayout(
+                ctrl,
+                layoutFor(
+                    player,
+                    radioInsteadOfRepeat = session.isMediaNotificationController(ctrl),
+                    isLiked = nowLiked,
+                ),
+            )
+        }
+
+        scope.launch {
+            runCatching {
+                if (nowLiked) {
+                    app.api.saveTracks(id)
+                } else {
+                    app.api.removeSavedTracks(id)
+                }
+            }.onFailure {
+                android.util.Log.w(TAG, "toggleLike remote call failed: ${it.message}")
+            }
+
+            if (app.downloadSettings.downloadLikedSongs.value) {
+                if (nowLiked) {
+                    val meta = player.currentMediaItem?.mediaMetadata
+                    val track = app.downloads.trackOf(uri) ?: CatalogTrack(
+                        uri = uri,
+                        name = meta?.title?.toString().orEmpty(),
+                        artist = meta?.artist?.toString().orEmpty(),
+                        album = meta?.albumTitle?.toString().orEmpty(),
+                        durationMs = meta?.durationMs ?: 0L,
+                        artworkUrl = meta?.artworkUri?.toString(),
+                    )
+                    app.downloads.addLiked(track)
+                    dev.lelonio.square.download.DownloadService.start(app)
+                } else {
+                    app.downloads.removeLiked(uri)
+                    app.downloads.pruneOrphans().forEach { orphanUri ->
+                        runCatching { NativeBridge.removeDownload(orphanUri) }
+                        dev.lelonio.square.download.DownloadExtras.forget(orphanUri)
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -544,6 +619,7 @@ class MediaBrowseTree(
         const val CMD_SHUFFLE = "dev.lelonio.square.SHUFFLE"
         const val CMD_REPEAT = "dev.lelonio.square.REPEAT"
         const val CMD_RADIO = "dev.lelonio.square.RADIO"
+        const val CMD_LIKE = "dev.lelonio.square.LIKE"
 
         const val ID_ROOT = "sq/root"
         const val ID_PLAYLISTS = "sq/playlists"

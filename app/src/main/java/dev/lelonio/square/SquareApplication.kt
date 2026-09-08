@@ -141,6 +141,11 @@ class SquareApplication : Application(), ImageLoaderFactory {
     /** Which playlists were opened most recently, for ordering the home page. */
     val playlistOrder: PlaylistOrderStore by lazy { PlaylistOrderStore(this) }
 
+    /** Tracks the listener has liked ("Tus me gusta"). */
+    val likedStore: dev.lelonio.square.data.LikedStore by lazy {
+        dev.lelonio.square.data.LikedStore(this)
+    }
+
     /** Playlists the listener keeps at the top of the library; this device's own. */
     val pinnedPlaylists: dev.lelonio.square.data.PinnedPlaylistStore by lazy {
         dev.lelonio.square.data.PinnedPlaylistStore(this)

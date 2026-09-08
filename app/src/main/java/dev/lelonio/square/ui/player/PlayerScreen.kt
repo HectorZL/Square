@@ -112,6 +112,7 @@ import com.adamglin.phosphoricons.fill.SkipForward
 import com.adamglin.phosphoricons.regular.CaretDown
 import com.adamglin.phosphoricons.regular.Devices
 import com.adamglin.phosphoricons.regular.Check
+import com.adamglin.phosphoricons.regular.Heart
 import com.adamglin.phosphoricons.regular.Plus
 import com.adamglin.phosphoricons.regular.Queue
 import com.adamglin.phosphoricons.regular.Broadcast
@@ -308,6 +309,8 @@ fun PlayerScreen(
      * mark: a heart, the way every Spotify client says it.
      */
     inLikedSongs: Boolean = false,
+    /** Direct toggle for Liked Songs ("Tus me gusta"). */
+    onToggleLike: (() -> Unit)? = null,
     /** Starts a station from the current track; null where there is none. */
     onRadio: (() -> Unit)? = null,
     /** The playlist picker's state, shown in the panel rather than as a sheet. */
@@ -1170,6 +1173,18 @@ fun PlayerScreen(
                                     backdrop = glassBackdrop,
                                     size = 40.dp,
                                     onClick = {
+                                        if (onToggleLike != null) {
+                                            onToggleLike()
+                                        } else {
+                                            panel = if (panel == PlayerPanel.ADD_TO_PLAYLIST) {
+                                                PlayerPanel.NONE
+                                            } else {
+                                                onAddToPlaylist()
+                                                PlayerPanel.ADD_TO_PLAYLIST
+                                            }
+                                        }
+                                    },
+                                    onLongClick = {
                                         panel = if (panel == PlayerPanel.ADD_TO_PLAYLIST) {
                                             PlayerPanel.NONE
                                         } else {
@@ -1182,13 +1197,13 @@ fun PlayerScreen(
                                         when {
                                             inLikedSongs -> PhosphorIcons.Fill.Heart
                                             alreadySaved -> PhosphorIcons.Regular.Check
-                                            else -> PhosphorIcons.Regular.Plus
+                                            else -> PhosphorIcons.Regular.Heart
                                         },
                                         contentDescription = stringResource(
                                             when {
-                                                inLikedSongs -> R.string.liked_songs
+                                                inLikedSongs -> R.string.remove_from_liked
                                                 alreadySaved -> R.string.in_a_playlist
-                                                else -> R.string.add_to_playlist
+                                                else -> R.string.liked_songs
                                             },
                                         ),
                                         tint = when {
@@ -1991,10 +2006,12 @@ private fun RoundGlassButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     LiquidButton(
         onClick = { if (enabled) onClick() },
+        onLongClick = if (enabled) onLongClick else null,
         backdrop = backdrop,
         modifier = modifier
             .size(size)

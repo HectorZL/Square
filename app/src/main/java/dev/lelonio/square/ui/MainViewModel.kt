@@ -1014,7 +1014,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             trackUri = trackUri,
             trackTitle = trackTitle,
             playlists = (_state.value as? UiState.Ready)?.playlists.orEmpty(),
-            liked = trackUri != null && trackUri in _liked.value,
+            liked = trackUri != null && container.likedStore.isLiked(trackUri),
             error = when {
                 trackUri?.startsWith("spotify:track:") != true ->
                     string(R.string.track_cannot_be_added)
@@ -1073,8 +1073,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     // Known at once, rather than when that playlist is next
                     // read: the tick is about the track, and the track is in a
                     // playlist from this moment.
-                    if (unsaving) _liked.value = _liked.value - trackUri
-                    else if (toLibrary) _liked.value = _liked.value + trackUri
+                    if (unsaving) container.likedStore.remove(trackUri)
+                    else if (toLibrary) container.likedStore.add(trackUri)
                     else _inPlaylists.value = _inPlaylists.value + trackUri
                     // The detail screen holds a list resolved before this track
                     // was in it; if that is the playlist just written to, read
@@ -2509,7 +2509,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // Liked Songs is not one of the playlists, and the player says so with
         // a heart rather than a tick.
         if (contextUri.endsWith(":collection")) {
-            _liked.value = _liked.value + tracks.map { it.uri }
+            container.likedStore.seed(tracks.map { it.uri })
             // Just read, so nothing missing from it is saved. The seeding
             // below is left to run: it is the tick's half that this says
             // nothing about.
@@ -2520,20 +2520,65 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _inPlaylists.value = _inPlaylists.value + tracks.map { it.uri }
     }
 
-    private val _liked = MutableStateFlow<Set<String>>(emptySet())
-
     /**
      * Tracks known to be in Liked Songs.
      *
-     * Read from the list itself wherever possible rather than asked about one
-     * track at a time. Spotify will answer "is this saved?" for a single URI,
-     * and asking that once a song for as long as the music plays is both a
-     * request the app does not need — it has usually read the whole list
-     * already — and a pattern nothing but a machine produces. So the copy of
-     * Liked Songs on disk answers first, and the network only hears about the
-     * tracks it cannot.
+     * Delegated to the persistent [LikedStore] so state survives app restarts
+     * and stays in lockstep with the notification and car controllers.
      */
-    val likedTracks: StateFlow<Set<String>> = _liked.asStateFlow()
+    val likedTracks: StateFlow<Set<String>> = container.likedStore.likedTracks
+
+    /**
+     * Direct toggle for Liked Songs ("Tus me gusta").
+     *
+     * Flips local state immediately for zero-latency UI response, syncs with Spotify
+     * in the background, and keeps offline downloads updated if enabled.
+     */
+    fun toggleLike(
+        trackUri: String?,
+        trackTitle: String? = null,
+        artist: String? = null,
+        artworkUrl: String? = null,
+    ) {
+        if (trackUri == null || !trackUri.startsWith("spotify:track:")) return
+        val nowLiked = container.likedStore.toggle(trackUri)
+        val id = trackUri.substringAfterLast(':')
+
+        if (_addToPlaylist.value.trackUri == trackUri) {
+            _addToPlaylist.value = _addToPlaylist.value.copy(liked = nowLiked)
+        }
+
+        viewModelScope.launch {
+            runCatching {
+                if (nowLiked) {
+                    container.api.saveTracks(id)
+                } else {
+                    container.api.removeSavedTracks(id)
+                }
+            }.onFailure {
+                android.util.Log.w(TAG, "toggleLike remote sync failed: ${it.message}")
+            }
+
+            if (container.downloadSettings.downloadLikedSongs.value) {
+                if (nowLiked) {
+                    val track = CatalogTrack(
+                        uri = trackUri,
+                        name = trackTitle.orEmpty(),
+                        artist = artist.orEmpty(),
+                        artworkUrl = artworkUrl,
+                    )
+                    container.downloads.addLiked(track)
+                    dev.lelonio.square.download.DownloadService.start(container)
+                } else {
+                    container.downloads.removeLiked(trackUri)
+                    container.downloads.pruneOrphans().forEach {
+                        runCatching { NativeBridge.removeDownload(it) }
+                        dev.lelonio.square.download.DownloadExtras.forget(it)
+                    }
+                }
+            }
+        }
+    }
 
     /** Tracks already asked about, saved or not, so each is asked once. */
     private val likedAsked = mutableSetOf<String>()
@@ -2558,7 +2603,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (uri == null || !uri.startsWith("spotify:track:")) return
         viewModelScope.launch {
             seedMembership()
-            if (uri in _liked.value || likedListTrusted) return@launch
+            if (container.likedStore.isLiked(uri) || likedListTrusted) return@launch
             if (!likedAsked.add(uri)) return@launch
 
             likedPending += uri
@@ -2594,7 +2639,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val liked = collection.takeIf { it.isNotEmpty() }
             ?.let { contextCache[it] ?: container.contextCache.read(it) }
         if (liked != null) {
-            _liked.value = _liked.value + liked.tracks.map { it.uri }
+            container.likedStore.seed(liked.tracks.map { it.uri })
             // Never downwards: this run may already have read the list itself,
             // which is fresher than anything on disk.
             likedListTrusted = likedListTrusted ||
@@ -2623,7 +2668,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val saved = uris.filterIndexed { index, _ -> answers.getOrNull(index) == true }
-        if (saved.isNotEmpty()) _liked.value = _liked.value + saved
+        if (saved.isNotEmpty()) container.likedStore.seed(saved)
+        val notSaved = uris.filterIndexed { index, _ -> answers.getOrNull(index) == false }
+        if (notSaved.isNotEmpty()) {
+            notSaved.forEach { container.likedStore.remove(it) }
+        }
     }
 
     /** The same question through the listener's own application. */

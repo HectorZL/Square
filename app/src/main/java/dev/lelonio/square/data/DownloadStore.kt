@@ -437,6 +437,34 @@ class DownloadStore(context: Context) {
         }
     }
 
+    /** Adds one track to the automatic download of liked songs. */
+    suspend fun addLiked(track: CatalogTrack) {
+        val existing = _owners.value[LIKED].orEmpty()
+        if (existing.contains(track.uri)) return
+        writeLock.withLock {
+            val current = _index.value
+            publish(
+                current.copy(
+                    owners = current.owners + (LIKED to existing + track.uri),
+                    tracks = current.tracks + (track.uri to track),
+                    failures = current.failures - track.uri,
+                ),
+            )
+            save()
+        }
+    }
+
+    /** Removes one track from the automatic download of liked songs. */
+    suspend fun removeLiked(trackUri: String) {
+        val existing = _owners.value[LIKED].orEmpty()
+        if (!existing.contains(trackUri)) return
+        writeLock.withLock {
+            val current = _index.value
+            publish(current.copy(owners = current.owners + (LIKED to existing - trackUri)))
+            save()
+        }
+    }
+
     /**
      * Forgets an owner. What it was alone in wanting is left for [pruneOrphans].
      *

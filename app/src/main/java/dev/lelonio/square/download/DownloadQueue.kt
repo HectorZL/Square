@@ -251,9 +251,13 @@ class DownloadQueue(
             .toList()
         if (missing.isEmpty()) return false
 
-        for ((uri, url) in missing) {
-            coversTried += uri
-            DownloadExtras.keep(url, "art")
+        missing.chunked(4).forEach { chunk ->
+            chunk.map { (uri, url) ->
+                scope.async {
+                    coversTried += uri
+                    DownloadExtras.keep(url, "art")
+                }
+            }.awaitAll()
             delay(COVER_GAP_MS)
         }
         return true
@@ -269,16 +273,18 @@ class DownloadQueue(
             .toList()
         if (missing.isEmpty()) return false
 
-        for (uri in missing) {
-            coversTried += uri
-            val cover = runCatching { NativeBridge.downloadState(uri) }
-                .getOrNull()
-                ?.let { runCatching { JSONObject(it).optString("coverUrl") }.getOrNull() }
-                ?.takeIf { it.isNotBlank() }
-                ?: continue
-            DownloadExtras.keep(cover, "art")
-            // No audio key is asked for here, so the pace that keeps the key
-            // limiter happy does not apply: this is an ordinary CDN image.
+        missing.chunked(4).forEach { chunk ->
+            chunk.map { uri ->
+                scope.async {
+                    coversTried += uri
+                    val cover = runCatching { NativeBridge.downloadState(uri) }
+                        .getOrNull()
+                        ?.let { runCatching { JSONObject(it).optString("coverUrl") }.getOrNull() }
+                        ?.takeIf { it.isNotBlank() }
+                        ?: return@async
+                    DownloadExtras.keep(cover, "art")
+                }
+            }.awaitAll()
             delay(COVER_GAP_MS)
         }
         return true
@@ -386,7 +392,21 @@ class DownloadQueue(
             // [gap].
             noteKeyWait(runCatching { JSONObject(sidecar).optLong("keyWaitMs", 0L) }.getOrDefault(0L))
             store.onCompleted(trackUri, recordOf(sidecar, kbps))
-            keepExtras(trackUri, sidecar)
+
+            // Essential cover kept immediately for thumbnail (lightweight, ~30KB)
+            val cover = runCatching { JSONObject(sidecar).optString("coverUrl") }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() }
+                ?: store.trackOf(trackUri)?.artworkUrl
+            if (cover != null) {
+                runCatching { DownloadExtras.keep(cover, "art") }
+            }
+
+            // Heavy extras (lyrics, canvas video, apple art) run asynchronously in the background
+            // so audio downloading for the next track starts immediately without waiting on MBs of video/art.
+            scope.launch {
+                keepRemainingExtras(trackUri)
+            }
             return Outcome.DONE
         }
 
@@ -406,40 +426,20 @@ class DownloadQueue(
     /**
      * Everything a downloaded song carries besides the song: the sleeve, the
      * tall picture, the words and the Canvas.
-     *
-     * Everything here fails quietly. A track with no lyrics is the ordinary
-     * case, a Canvas that will not fetch is a still cover, and neither is worth
-     * failing a download that has already succeeded — the music is on the
-     * phone, which is what was asked for.
-     *
-     * Each half is skipped when it has already been asked about, so this is
-     * also what the backfill runs: a song downloaded by a build that had none
-     * of this ends up with all of it, and a song that has it is left alone.
      */
     private suspend fun keepExtras(trackUri: String, sidecar: String) {
-        runCatching {
-            // The cover first, and deliberately. It is a few tens of kilobytes
-            // and it is the one extra that is missed the moment it is absent —
-            // a song playing with a blank tile in the notification. The Canvas
-            // below is megabytes of video; behind it, covers arrived at about
-            // one a minute.
-            //
-            // The size the engine recorded is the large one, which is what the
-            // player screen wants. The row thumbnail finds it too: covers are
-            // keyed on the picture rather than the size. See DownloadExtras.
-            val cover = runCatching { JSONObject(sidecar).optString("coverUrl") }
-                .getOrNull()
-                ?.takeIf { it.isNotBlank() }
-                ?: store.trackOf(trackUri)?.artworkUrl
-            // The sidecar's cover comes from the engine's own metadata, which
-            // does not always carry one; the catalogue's does. Without either,
-            // a downloaded song plays offline with a drawn tile where its
-            // sleeve should be.
-            val kept = cover?.let { DownloadExtras.keep(it, "art") }
-            if (kept == null) {
-                android.util.Log.i("SquareDownloads", "no cover kept for $trackUri")
-            }
+        val cover = runCatching { JSONObject(sidecar).optString("coverUrl") }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: store.trackOf(trackUri)?.artworkUrl
+        if (cover != null) {
+            runCatching { DownloadExtras.keep(cover, "art") }
+        }
+        keepRemainingExtras(trackUri)
+    }
 
+    private suspend fun keepRemainingExtras(trackUri: String) {
+        runCatching {
             val track = store.trackOf(trackUri)
 
             // The words. Asking is the whole of the keeping: the chain the

@@ -45,6 +45,31 @@ class PlaybackService : MediaLibraryService() {
     private var engineStarted = false
 
     private lateinit var container: dev.lelonio.square.SquareApplication
+    private lateinit var browseTree: MediaBrowseTree
+
+    private fun redrawButtons() {
+        val live = session ?: return
+        live.connectedControllers.forEach { controller ->
+            live.setCustomLayout(
+                controller,
+                browseTree.layoutFor(
+                    player,
+                    radioInsteadOfRepeat = live.isMediaNotificationController(controller),
+                ),
+            )
+        }
+    }
+
+    private val buttonsListener = object : androidx.media3.common.Player.Listener {
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = redrawButtons()
+
+        override fun onRepeatModeChanged(repeatMode: Int) = redrawButtons()
+
+        override fun onMediaItemTransition(
+            mediaItem: androidx.media3.common.MediaItem?,
+            reason: Int,
+        ) = redrawButtons()
+    }
 
     /** Whatever the active backend plays through. */
     private lateinit var player: androidx.media3.common.Player
@@ -96,7 +121,7 @@ class PlaybackService : MediaLibraryService() {
         crossfade = container.crossfade
 
         player = buildPlayer(container.preferences.backend.value)
-        val browseTree = MediaBrowseTree(this, scope, ::ensurePlayerFor)
+        browseTree = MediaBrowseTree(this, scope, ::ensurePlayerFor)
         session = MediaLibrarySession.Builder(this, player, browseTree)
             // Without this the notification is inert to a tap: Media3 has no way
             // to know which activity owns the session. `SINGLE_TOP` so an app
@@ -130,32 +155,15 @@ class PlaybackService : MediaLibraryService() {
                 .apply { setSmallIcon(dev.lelonio.square.R.drawable.ic_notification) },
         )
 
-        // The car's shuffle and repeat buttons carry their own state, so they
-        // are redrawn whenever the mode changes here — from the app, from a
-        // headset, or from another Connect device.
-        player.addListener(object : androidx.media3.common.Player.Listener {
-            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = redrawButtons()
+        // The notification and car buttons carry their own state (shuffle, repeat,
+        // and heart/like), so they are redrawn whenever the mode or track changes.
+        player.addListener(buttonsListener)
 
-            override fun onRepeatModeChanged(repeatMode: Int) = redrawButtons()
-
-            /**
-             * Per controller, because the two layouts differ: the shade shows
-             * radio where the car shows repeat, and one blanket update would
-             * hand every controller the same pair.
-             */
-            private fun redrawButtons() {
-                val live = session ?: return
-                live.connectedControllers.forEach { controller ->
-                    live.setCustomLayout(
-                        controller,
-                        browseTree.layoutFor(
-                            player,
-                            radioInsteadOfRepeat = live.isMediaNotificationController(controller),
-                        ),
-                    )
-                }
+        scope.launch {
+            container.likedStore.likedTracks.collect {
+                redrawButtons()
             }
-        })
+        }
 
         // Already read by the application object, and harmless twice: `load`
         // returns at once once the file is open.
@@ -604,7 +612,9 @@ class PlaybackService : MediaLibraryService() {
             librespot = null
             playerKind = kind
             player = buildPlayer(kind)
+            player.addListener(buttonsListener)
             session?.player = player
+            redrawButtons()
             // The queue on disk belongs to this player when it is the one being
             // restored into — leaving it out is what made a local song paused
             // at closing time impossible to start again: the screen had it, the
@@ -627,7 +637,9 @@ class PlaybackService : MediaLibraryService() {
             librespot = parked
             playerKind = kind
             player = parked
+            player.addListener(buttonsListener)
             session?.player = player
+            redrawButtons()
             if (restore) restoreQueue()
             observeForSaving()
             return
@@ -655,7 +667,9 @@ class PlaybackService : MediaLibraryService() {
         dev.lelonio.square.backend.youtube.YouTubeVideoMode.reset()
 
         player = buildPlayer(kind)
+        player.addListener(buttonsListener)
         session?.player = player
+        redrawButtons()
         followReverb()
         // The engine is what the Spotify player plays through, so it is started
         // whatever brought us here — without this, coming back from a local file

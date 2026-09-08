@@ -864,6 +864,7 @@ private fun DownloadsSection(backdrop: Backdrop) {
     val failures by store.failures.collectAsStateWithLifecycle()
     val quality by settings.quality.collectAsStateWithLifecycle()
     val wifiOnly by settings.wifiOnly.collectAsStateWithLifecycle()
+    val likedSongs by settings.downloadLikedSongs.collectAsStateWithLifecycle()
     val offline by settings.offlineMode.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
@@ -914,6 +915,41 @@ private fun DownloadsSection(backdrop: Backdrop) {
             checked = wifiOnly,
             backdrop = backdrop,
             onChange = settings::setWifiOnly,
+        )
+
+        RowDivider()
+        DownloadSwitch(
+            label = stringResource(R.string.download_liked_songs),
+            checked = likedSongs,
+            backdrop = backdrop,
+            note = stringResource(R.string.download_liked_songs_note),
+            onChange = { enable ->
+                settings.setDownloadLikedSongs(enable)
+                if (enable) {
+                    scope.launch {
+                        val tracks = app.likedStore.likedTracks.value
+                        if (tracks.isNotEmpty()) {
+                            val likedTracksList = tracks.map { uri ->
+                                store.trackOf(uri) ?: dev.lelonio.square.data.CatalogTrack(
+                                    uri = uri,
+                                    name = "",
+                                    artist = "",
+                                )
+                            }
+                            store.setOwner(dev.lelonio.square.data.DownloadStore.LIKED, likedTracksList, label = null)
+                            dev.lelonio.square.download.DownloadService.start(app)
+                        }
+                    }
+                } else {
+                    scope.launch {
+                        store.removeOwner(dev.lelonio.square.data.DownloadStore.LIKED)
+                        store.pruneOrphans().forEach { orphanUri ->
+                            runCatching { dev.lelonio.square.nativecore.NativeBridge.removeDownload(orphanUri) }
+                            dev.lelonio.square.download.DownloadExtras.forget(orphanUri)
+                        }
+                    }
+                }
+            },
         )
 
         RowDivider()
@@ -969,6 +1005,7 @@ private fun DownloadSwitch(
     label: String,
     checked: Boolean,
     backdrop: Backdrop,
+    note: String? = null,
     onChange: (Boolean) -> Unit,
 ) {
     Row(
@@ -979,7 +1016,17 @@ private fun DownloadSwitch(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            if (note != null) {
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = InkDim,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
         dev.lelonio.square.ui.glass.LiquidToggle(
             selected = { checked },
             onSelect = onChange,
