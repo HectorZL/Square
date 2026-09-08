@@ -56,15 +56,15 @@ object ApiFactory {
                     )
                 }
             }
-            .build()
 
         return Retrofit.Builder()
             .baseUrl(BASE_URL)
-            .client(client)
+            .client(clientBuilder.build())
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(SpotifyApi::class.java)
     }
+
 
     /**
      * Waits out a single 429 when Spotify says how long to wait.
