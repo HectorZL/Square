@@ -656,8 +656,7 @@ fun PlaylistScreen(
             onToggleFollow = onToggleFollow,
             download = downloadState,
             onToggleDownload = {
-                val kept = downloadState is dev.lelonio.square.data.OwnerState.Complete ||
-                    downloadState is dev.lelonio.square.data.OwnerState.Partial
+                val kept = downloadState !is dev.lelonio.square.data.OwnerState.None
                 if (kept) confirmingRemoval = true else onToggleDownload()
             },
             // Only where the reference puts one: a record or a list. An artist

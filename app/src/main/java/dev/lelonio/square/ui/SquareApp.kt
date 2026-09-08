@@ -2786,40 +2786,32 @@ fun SquareApp(
                                     ?.let { uri ->
                                         {
                                             scope.launch {
-                                                val tracks = viewModel.radioFor(uri)
-                                                if (tracks.isEmpty()) return@launch
-                                                // The station as a page, not
-                                                // just as a queue. A radio the
-                                                // listener cannot look at is a
-                                                // shuffle with a different
-                                                // name: the point of it is
-                                                // seeing what it built.
-                                                val station =
-                                                    "spotify:station:track:" +
-                                                        uri.substringAfterLast(':')
-                                                // Named after the song it grew
-                                                // from: two stations are told
-                                                // apart by nothing else, and
-                                                // "Radio" alone says which
-                                                // feature it is rather than
-                                                // which station this is.
-                                                val name = radioOf(playback.title)
-                                                viewModel.showStation(
-                                                    uri = station,
-                                                    name = name,
-                                                    artworkUrl = playback.artworkUrl,
-                                                    tracks = tracks,
-                                                )
-                                                expand.animateTo(0f, expandSpec)
-                                                navController.navigate(Routes.PLAYLIST)
-                                                onPlay(
-                                                    tracks,
-                                                    0,
-                                                    station,
-                                                    true,
-                                                    name,
-                                                    0L,
-                                                )
+                                                runCatching {
+                                                    val tracks = viewModel.radioFor(uri)
+                                                    if (tracks.isEmpty()) return@launch
+                                                    val station =
+                                                        "spotify:station:track:" +
+                                                            uri.substringAfterLast(':')
+                                                    val name = radioOf(playback.title)
+                                                    viewModel.showStation(
+                                                        uri = station,
+                                                        name = name,
+                                                        artworkUrl = playback.artworkUrl,
+                                                        tracks = tracks,
+                                                    )
+                                                    expand.animateTo(0f, expandSpec)
+                                                    navController.navigate(Routes.PLAYLIST)
+                                                    onPlay(
+                                                        tracks,
+                                                        0,
+                                                        station,
+                                                        true,
+                                                        name,
+                                                        0L,
+                                                    )
+                                                }.onFailure {
+                                                    android.util.Log.e("SquareApp", "Failed to start radio: ${it.message}")
+                                                }
                                             }
                                             Unit
                                         }
@@ -2971,8 +2963,7 @@ fun SquareApp(
                             !offlineNow
                         if (keepable) {
                             val kept = downloadOwners[shownPlaylist.uri]
-                            val isKept = kept is dev.lelonio.square.data.OwnerState.Complete ||
-                                kept is dev.lelonio.square.data.OwnerState.Partial
+                            val isKept = kept != null && kept !is dev.lelonio.square.data.OwnerState.None
                             TrackSheetAction(
                                 stringResource(
                                     if (isKept) R.string.remove_download else R.string.download,
@@ -3698,7 +3689,7 @@ private const val UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
 private fun savedPlaybackSeed(context: android.content.Context): PlaybackState? {
     val saved = dev.lelonio.square.data.PlaybackStore(context).load() ?: return null
     val position = saved.shuffleOrder?.getOrNull(saved.index) ?: saved.index
-    val track = saved.tracks.getOrNull(position) ?: return null
+    val track = saved.tracks.getOrNull(position)?.takeIf { it.name.isNotBlank() } ?: return null
     return PlaybackState(
         hasItem = true,
         mediaId = track.uri,

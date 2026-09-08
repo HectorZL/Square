@@ -130,7 +130,9 @@ class SpotifyBackend(private val container: SquareApplication) : MusicBackend {
     override suspend fun playlists(): List<CatalogPlaylist> =
         likedSongs().let { liked ->
             listOfNotNull(liked) +
-                rootlist().filterNot { it.uri == liked?.uri || it.uri == Catalog.DJ_URI }
+                rootlist().filterNot {
+                    it.uri == liked?.uri || it.uri == Catalog.DJ_URI || it.uri.startsWith("spotify:station:")
+                }
         }
 
     private suspend fun rootlist(): List<CatalogPlaylist> =

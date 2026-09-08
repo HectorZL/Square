@@ -442,6 +442,7 @@ class DownloadStore(context: Context) {
         val existing = _owners.value[LIKED].orEmpty()
         if (existing.contains(track.uri)) return
         writeLock.withLock {
+            ensureLoaded()
             val current = _index.value
             publish(
                 current.copy(
@@ -459,6 +460,7 @@ class DownloadStore(context: Context) {
         val existing = _owners.value[LIKED].orEmpty()
         if (!existing.contains(trackUri)) return
         writeLock.withLock {
+            ensureLoaded()
             val current = _index.value
             publish(current.copy(owners = current.owners + (LIKED to existing - trackUri)))
             save()
@@ -488,7 +490,10 @@ class DownloadStore(context: Context) {
     // ---------------------------------------------------- what the queue says
 
     fun onProgress(trackUri: String, fraction: Float) {
-        _progress.value = _progress.value + (trackUri to fraction.coerceIn(0f, 1f))
+        val current = _progress.value[trackUri]
+        val clamped = fraction.coerceIn(0f, 1f)
+        if (current != null && Math.abs(clamped - current) < 0.01f && clamped < 1f) return
+        _progress.value = _progress.value + (trackUri to clamped)
     }
 
     /**

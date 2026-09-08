@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -54,6 +56,7 @@ class DownloadQueue(
         val running: Boolean = false,
         val done: Int = 0,
         val total: Int = 0,
+        val currentTitle: String? = null,
         /** Why nothing is happening, when nothing is happening. */
         val waiting: Waiting? = null,
         /**
@@ -72,6 +75,7 @@ class DownloadQueue(
     private val appContext = context.applicationContext
     private val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val extrasSemaphore = Semaphore(1)
 
     private val _status = MutableStateFlow(Status())
     val status: StateFlow<Status> = _status.asStateFlow()
@@ -192,8 +196,9 @@ class DownloadQueue(
                     continue
                 }
 
-                publish(waiting = null)
                 val batch = pending.take(PARALLEL)
+                val currentUri = batch.firstOrNull()
+                publish(waiting = null, currentTrackUri = currentUri)
                 val outcomes = batch
                     .map { uri -> async { attempt(uri) } }
                     .awaitAll()
@@ -402,10 +407,12 @@ class DownloadQueue(
                 runCatching { DownloadExtras.keep(cover, "art") }
             }
 
-            // Heavy extras (lyrics, canvas video, apple art) run asynchronously in the background
-            // so audio downloading for the next track starts immediately without waiting on MBs of video/art.
+            // Heavy extras (lyrics, canvas video, apple art) run sequentially in the background
+            // with a semaphore to prevent network/CPU saturation that slows down the UI.
             scope.launch {
-                keepRemainingExtras(trackUri)
+                extrasSemaphore.withPermit {
+                    keepRemainingExtras(trackUri)
+                }
             }
             return Outcome.DONE
         }
@@ -616,13 +623,15 @@ class DownloadQueue(
         runCatching { connectivity?.unregisterNetworkCallback(networkCallback) }
     }
 
-    private fun publish(waiting: Waiting?) {
+    private fun publish(waiting: Waiting?, currentTrackUri: String? = null) {
         val wanted = store.owners.value.values.flatten().toSet()
         val files = store.files.value
+        val trackTitle = currentTrackUri?.let { store.trackOf(it)?.name }?.takeIf { it.isNotBlank() }
         _status.value = Status(
             running = true,
             done = wanted.count(files::containsKey),
             total = wanted.size,
+            currentTitle = trackTitle,
             waiting = waiting,
         )
     }

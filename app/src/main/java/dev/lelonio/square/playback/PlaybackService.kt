@@ -1209,6 +1209,8 @@ class PlaybackService : MediaLibraryService() {
                 artworkUrl = metadata.artworkUri?.toString(),
             )
         }
+        val currentTrack = tracks.getOrNull(player.currentMediaItemIndex)
+        if (currentTrack != null && currentTrack.name.isBlank()) return
         val extras = player.currentMediaItem?.mediaMetadata?.extras
         playbackStore.save(
             SavedPlayback(

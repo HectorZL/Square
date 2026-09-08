@@ -329,13 +329,15 @@ fun HomeScreen(
                         .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
                         .drawWithContent {
                             drawContent()
-                            drawRect(
-                                brush = Brush.verticalGradient(
-                                    0f to Color.Transparent,
-                                    FADE_FRACTION to Color.Black,
-                                ),
-                                blendMode = BlendMode.DstIn,
-                            )
+                            if (collapse > 0.01f) {
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0f to Color.Transparent,
+                                        (FADE_FRACTION * collapse) to Color.Black,
+                                    ),
+                                    blendMode = BlendMode.DstIn,
+                                )
+                            }
                         },
                     state = listState,
                     // The header already covers the status bar, so only the
