@@ -93,8 +93,19 @@ fun Artwork(
             // handed to the loader is the copy on the disk. Online the url
             // stays: covers are kept keyed on the picture rather than its size,
             // so the file behind a url may be a smaller print of it, and a page
-            // that can fetch the large one should.
-            val source = remember(url) { artSource(url) }
+            // that can fetch the large one should — unless a small decode target
+            // is set, in which case requesting the 300 px print from Spotify's
+            // CDN avoids transferring 640 px just to throw most of it away.
+            val densityVal = density
+            val source = remember(url, decodeSize) {
+                val base = artSource(url)
+                // Only resize when: online (artSource returned the url itself),
+                // AND a decode target is set that fits within the small print.
+                if (base is String && decodeSize > 0.dp) {
+                    val targetPx = with(densityVal) { decodeSize.toPx() }.roundToInt()
+                    spotifyResizedUrl(base, targetPx)
+                } else base
+            }
             val request = remember(source, decodeSize, crossfadeMs) {
                 ImageRequest.Builder(context)
                     .data(source)
@@ -223,6 +234,41 @@ private fun isOnThisPhone(url: String): Boolean =
         url.startsWith("/") ||
         url.startsWith("content:") ||
         dev.lelonio.square.download.DownloadExtras.fileOf(url, "art") != null
+
+/**
+ * Requests a smaller print of a Spotify CDN image when a small decode target
+ * is given, rather than fetching 640 px and throwing most of it away.
+ *
+ * Spotify image IDs are forty lowercase hex characters. The first sixteen
+ * encode the resolution; the last twenty-four identify the picture. Swapping
+ * the prefix is enough to request any print the CDN publishes.
+ *
+ * Known prefixes (from the Spotify web player):
+ *  - `ab67616d0000b273` → 640 × 640 px
+ *  - `ab67616d00001e02` → 300 × 300 px
+ *  - `ab67616d00004851` → 64 × 64 px
+ *
+ * Only fires for URLs whose last path component looks like a Spotify image ID
+ * (40 hex chars). Everything else is returned unchanged.
+ */
+fun spotifyResizedUrl(url: String, targetPx: Int): String {
+    if (targetPx <= 0) return url
+    val id = url.substringAfterLast('/')
+    if (id.length != SPOTIFY_ID_LEN || !id.all { it.isDigit() || it in 'a'..'f' }) return url
+    val smallPrefix = when {
+        targetPx <= 64  -> "ab67616d00004851"
+        targetPx <= 300 -> "ab67616d00001e02"
+        else            -> return url  // 640 px — keep the original URL
+    }
+    val tail = id.drop(SPOTIFY_SIZE_PREFIX_LEN)
+    return url.dropLast(SPOTIFY_ID_LEN) + smallPrefix + tail
+}
+
+/** Length of a Spotify image ID, in hex characters. */
+private const val SPOTIFY_ID_LEN = 40
+
+/** How many of those characters encode the image size. */
+private const val SPOTIFY_SIZE_PREFIX_LEN = 16
 
 /** The shelf of songs downloaded on their own; see DownloadStore.SINGLES. */
 const val DOWNLOADS_COVER = "square:downloads-cover"

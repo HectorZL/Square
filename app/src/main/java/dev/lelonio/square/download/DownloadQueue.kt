@@ -18,6 +18,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -257,12 +259,14 @@ class DownloadQueue(
         if (missing.isEmpty()) return false
 
         missing.chunked(4).forEach { chunk ->
-            chunk.map { (uri, url) ->
-                scope.async {
-                    coversTried += uri
-                    DownloadExtras.keep(url, "art")
-                }
-            }.awaitAll()
+            coroutineScope {
+                chunk.map { (uri, url) ->
+                    async {
+                        coversTried += uri
+                        DownloadExtras.keep(url, "art")
+                    }
+                }.awaitAll()
+            }
             delay(COVER_GAP_MS)
         }
         return true
@@ -279,17 +283,19 @@ class DownloadQueue(
         if (missing.isEmpty()) return false
 
         missing.chunked(4).forEach { chunk ->
-            chunk.map { uri ->
-                scope.async {
-                    coversTried += uri
-                    val cover = runCatching { NativeBridge.downloadState(uri) }
-                        .getOrNull()
-                        ?.let { runCatching { JSONObject(it).optString("coverUrl") }.getOrNull() }
-                        ?.takeIf { it.isNotBlank() }
-                        ?: return@async
-                    DownloadExtras.keep(cover, "art")
-                }
-            }.awaitAll()
+            coroutineScope {
+                chunk.map { uri ->
+                    async {
+                        coversTried += uri
+                        val cover = runCatching { NativeBridge.downloadState(uri) }
+                            .getOrNull()
+                            ?.let { runCatching { JSONObject(it).optString("coverUrl") }.getOrNull() }
+                            ?.takeIf { it.isNotBlank() }
+                            ?: return@async
+                        DownloadExtras.keep(cover, "art")
+                    }
+                }.awaitAll()
+            }
             delay(COVER_GAP_MS)
         }
         return true
@@ -599,15 +605,21 @@ class DownloadQueue(
     }
 
     private suspend fun awaitAllowed() {
-        // The setting can change as well as the link, and a StateFlow of one
-        // will not report the other. Combining them would mean building a flow
-        // for a wait that ends either way, so this simply waits on whichever
-        // moves and re-asks.
-        val before = _link.value
-        val wifiBefore = settings.wifiOnly.value
-        while (_link.value == before && settings.wifiOnly.value == wifiBefore) {
-            delay(NETWORK_POLL_MS)
-        }
+        // Suspend without polling: combine both state flows and resume the
+        // moment either changes to a state that permits downloading.
+        //
+        // The old implementation polled every NETWORK_POLL_MS (1 500 ms) in a
+        // busy-wait loop even when neither the link nor the WiFi setting had
+        // moved — burning CPU and preventing the coroutine from suspending
+        // cleanly. combine() + first() gives us the same semantic — "wait until
+        // downloading is allowed" — at zero steady-state cost.
+        combine(_link, settings.wifiOnly) { link, wifiOnly ->
+            when (link) {
+                Link.NONE     -> false
+                Link.METERED  -> !wifiOnly
+                Link.UNMETERED -> true
+            }
+        }.first { allowed -> allowed }
     }
 
     private fun holdWatch() {
@@ -685,7 +697,7 @@ class DownloadQueue(
          */
         const val THROTTLED_WAIT_MS = 20_000L
 
-        const val NETWORK_POLL_MS = 1_500L
+
 
         /** How long to leave the engine alone before asking it again. */
         const val ENGINE_POLL_MS = 3_000L
