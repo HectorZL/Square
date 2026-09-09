@@ -281,12 +281,14 @@ interface SpotifyApi {
     suspend fun followArtists(
         @Query("type") type: String = "artist",
         @Query("ids") ids: String,
+        @Body request: IdsDto = IdsDto(ids.split(",").map { it.trim() }),
     )
 
-    @DELETE("v1/me/following")
+    @HTTP(method = "DELETE", path = "v1/me/following", hasBody = true)
     suspend fun unfollowArtists(
         @Query("type") type: String = "artist",
         @Query("ids") ids: String,
+        @Body request: IdsDto = IdsDto(ids.split(",").map { it.trim() }),
     )
 
     @GET("v1/me/following/contains")
@@ -314,7 +316,10 @@ interface SpotifyApi {
      * button on the page, two endpoints underneath.
      */
     @PUT("v1/playlists/{id}/followers")
-    suspend fun followPlaylist(@Path("id") playlistId: String)
+    suspend fun followPlaylist(
+        @Path("id") playlistId: String,
+        @Body request: FollowPlaylistRequestDto = FollowPlaylistRequestDto(),
+    )
 
     @GET("v1/playlists/{id}/followers/contains")
     suspend fun playlistIsFollowed(
@@ -324,17 +329,29 @@ interface SpotifyApi {
 
     /** Saves tracks to Liked Songs, which is what the heart in the player says. */
     @PUT("v1/me/tracks")
-    suspend fun saveTracks(@Query("ids") ids: String)
+    suspend fun saveTracks(
+        @Query("ids") ids: String,
+        @Body request: IdsDto = IdsDto(ids.split(",").map { it.trim() }),
+    )
 
     /** And takes them out again, which is the heart pressed a second time. */
-    @DELETE("v1/me/tracks")
-    suspend fun removeSavedTracks(@Query("ids") ids: String)
+    @HTTP(method = "DELETE", path = "v1/me/tracks", hasBody = true)
+    suspend fun removeSavedTracks(
+        @Query("ids") ids: String,
+        @Body request: IdsDto = IdsDto(ids.split(",").map { it.trim() }),
+    )
 
     @PUT("v1/me/albums")
-    suspend fun saveAlbums(@Query("ids") ids: String)
+    suspend fun saveAlbums(
+        @Query("ids") ids: String,
+        @Body request: IdsDto = IdsDto(ids.split(",").map { it.trim() }),
+    )
 
-    @DELETE("v1/me/albums")
-    suspend fun removeAlbums(@Query("ids") ids: String)
+    @HTTP(method = "DELETE", path = "v1/me/albums", hasBody = true)
+    suspend fun removeAlbums(
+        @Query("ids") ids: String,
+        @Body request: IdsDto = IdsDto(ids.split(",").map { it.trim() }),
+    )
 
     @GET("v1/me/albums/contains")
     suspend fun albumsAreSaved(@Query("ids") ids: String): List<Boolean>
@@ -349,6 +366,12 @@ interface SpotifyApi {
         @Query("offset") offset: Int = 0,
     ): SearchDto
 }
+
+@Serializable
+data class IdsDto(val ids: List<String>)
+
+@Serializable
+data class FollowPlaylistRequestDto(val public: Boolean = false)
 
 @Serializable
 data class AddTracksRequestDto(val uris: List<String>)

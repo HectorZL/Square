@@ -235,17 +235,34 @@ class MediaBrowseTree(
         }
 
         scope.launch {
-            runCatching {
+            val callResult = runCatching {
                 if (nowLiked) {
                     app.api.saveTracks(id)
                 } else {
                     app.api.removeSavedTracks(id)
                 }
+            }
+            callResult.onSuccess {
+                android.util.Log.d(TAG, "toggleLike remote call succeeded for $id (nowLiked=$nowLiked)")
             }.onFailure {
-                android.util.Log.w(TAG, "toggleLike remote call failed: ${it.message}")
+                android.util.Log.w(TAG, "toggleLike remote call failed for $id: ${it.message}", it)
+                if (!dev.lelonio.square.playback.OfflineMode.active.value) {
+                    if (nowLiked) app.likedStore.remove(uri)
+                    else app.likedStore.add(uri)
+                    session.connectedControllers.forEach { ctrl ->
+                        session.setCustomLayout(
+                            ctrl,
+                            layoutFor(
+                                player,
+                                radioInsteadOfRepeat = session.isMediaNotificationController(ctrl),
+                                isLiked = !nowLiked,
+                            ),
+                        )
+                    }
+                }
             }
 
-            if (app.downloadSettings.downloadLikedSongs.value) {
+            if (callResult.isSuccess && app.downloadSettings.downloadLikedSongs.value) {
                 if (nowLiked) {
                     val meta = player.currentMediaItem?.mediaMetadata
                     val track = app.downloads.trackOf(uri) ?: CatalogTrack(

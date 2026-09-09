@@ -119,7 +119,11 @@ object ApiFactory {
         }
     }
 
-    private class AuthInterceptor(private val tokens: TokenStore) : Interceptor {
+    private class AuthInterceptor(
+        private val tokens: TokenStore,
+        private val fallbackTokens: TokenStore? = null,
+        private val nativeToken: (() -> String?)? = null,
+    ) : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
             // OkHttp interceptors are blocking by contract and always run on a
             // background thread, so bridging into the suspending token store
@@ -129,8 +133,27 @@ object ApiFactory {
             // only routes IOException to onFailure and rethrows anything else on
             // its own thread, which takes the whole process down instead of
             // failing the one call.
+            var usedFallback = false
             val token = try {
-                runBlocking { tokens.validAccessToken() }
+                runBlocking {
+                    if (tokens.isLoggedIn) {
+                        try {
+                            tokens.validAccessToken()
+                        } catch (e: Exception) {
+                            if (fallbackTokens?.isLoggedIn == true) {
+                                usedFallback = true
+                                fallbackTokens.validAccessToken()
+                            } else {
+                                nativeToken?.invoke() ?: throw e
+                            }
+                        }
+                    } else if (fallbackTokens?.isLoggedIn == true) {
+                        usedFallback = true
+                        fallbackTokens.validAccessToken()
+                    } else {
+                        nativeToken?.invoke() ?: tokens.validAccessToken()
+                    }
+                }
             } catch (e: IOException) {
                 throw e
             } catch (e: Exception) {
@@ -140,7 +163,31 @@ object ApiFactory {
             val request = chain.request().newBuilder()
                 .header("Authorization", "Bearer $token")
                 .build()
-            return chain.proceed(request)
+            val response = chain.proceed(request)
+
+            // If the primary token is refused (401 or 403, for instance because the custom app
+            // was authorized before user-library-modify scope was added), retry with the account's session token.
+            if ((response.code == 401 || response.code == 403) && !usedFallback && (fallbackTokens?.isLoggedIn == true || nativeToken?.invoke() != null)) {
+                android.util.Log.w("SquareApi", "HTTP ${response.code} with Web API token; retrying with account session token")
+                response.close()
+                val fallbackToken = try {
+                    runBlocking {
+                        if (fallbackTokens?.isLoggedIn == true) {
+                            fallbackTokens.validAccessToken()
+                        } else {
+                            nativeToken?.invoke() ?: throw IOException("no fallback token available")
+                        }
+                    }
+                } catch (e: Exception) {
+                    throw IOException("could not obtain fallback access token", e)
+                }
+                val retryRequest = chain.request().newBuilder()
+                    .header("Authorization", "Bearer $fallbackToken")
+                    .build()
+                return chain.proceed(retryRequest)
+            }
+
+            return response
         }
     }
 }

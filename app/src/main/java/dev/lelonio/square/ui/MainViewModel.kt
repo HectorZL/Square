@@ -1018,7 +1018,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             error = when {
                 trackUri?.startsWith("spotify:track:") != true ->
                     string(R.string.track_cannot_be_added)
-                !container.webApi.isReady ->
+                !container.webApi.isReady && !container.tokenStore.isLoggedIn ->
                     string(R.string.connect_app_in_settings)
                 else -> null
             },
@@ -2541,17 +2541,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         viewModelScope.launch {
-            runCatching {
+            val syncResult = runCatching {
                 if (nowLiked) {
                     container.api.saveTracks(id)
                 } else {
                     container.api.removeSavedTracks(id)
                 }
+            }
+            syncResult.onSuccess {
+                android.util.Log.d(TAG, "toggleLike remote sync succeeded for $id (nowLiked=$nowLiked)")
             }.onFailure {
-                android.util.Log.w(TAG, "toggleLike remote sync failed: ${it.message}")
+                android.util.Log.w(TAG, "toggleLike remote sync failed for $id: ${it.message}", it)
+                // If the remote call failed and not in offline mode, revert local state
+                if (!dev.lelonio.square.playback.OfflineMode.active.value) {
+                    if (nowLiked) container.likedStore.remove(trackUri)
+                    else container.likedStore.add(trackUri)
+                    if (_addToPlaylist.value.trackUri == trackUri) {
+                        _addToPlaylist.value = _addToPlaylist.value.copy(liked = !nowLiked)
+                    }
+                }
             }
 
-            if (container.downloadSettings.downloadLikedSongs.value) {
+            if (syncResult.isSuccess && container.downloadSettings.downloadLikedSongs.value) {
                 if (nowLiked) {
                     val track = CatalogTrack(
                         uri = trackUri,
@@ -2669,7 +2680,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The same question through the listener's own application. */
     private suspend fun webApiSaved(uris: List<String>): List<Boolean>? {
-        if (!container.webApi.isReady) return null
+        if (!container.webApi.isReady && !container.tokenStore.isLoggedIn) return null
         return runCatching {
             container.api.tracksAreSaved(uris.joinToString(",") { it.substringAfterLast(':') })
         }
@@ -3499,7 +3510,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // Nothing else knows this list: the access point refuses the
             // collection as a context, so without the gateway and without a
             // registered application there is no answer to give.
-            check(container.webApi.isReady) { string(R.string.liked_songs_failed) }
+            check(container.webApi.isReady || container.tokenStore.isLoggedIn) { string(R.string.liked_songs_failed) }
             return webApiSavedTracks(base, showProgress)
         }
 
