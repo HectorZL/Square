@@ -240,9 +240,9 @@ class SquareApplication : Application(), ImageLoaderFactory {
      * falls back to the device's locale country, or "from_token".
      */
     val userCountry: String
-        get() = preferences.userCountry?.takeIf { it.length == 2 }
-            ?: java.util.Locale.getDefault().country.takeIf { it.length == 2 }
-            ?: "from_token"
+        get() = preferences.userCountry?.takeIf { it.length == 2 }?.uppercase()
+            ?: java.util.Locale.getDefault().country.takeIf { it.length == 2 }?.uppercase()
+            ?: "US"
 
     val api: SpotifyApi by lazy {
         ApiFactory.create(

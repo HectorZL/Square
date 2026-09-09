@@ -689,7 +689,12 @@ fun SquareApp(
     // Once, on the first composition that has a usable Web API session. The
     // ViewModel keeps what it fetched, so navigating away and back does not
     // spend the quota again.
-    LaunchedEffect(webApi.connected) { viewModel.loadFeed() }
+    LaunchedEffect(webApi.connected) {
+        if (webApi.connected) {
+            viewModel.loadFeed()
+            viewModel.loadProfile()
+        }
+    }
     // Two layers, and the split is not optional.
     //
     // `pageBackdrop` records the artwork *and* the screen on top of it, and is
@@ -1441,7 +1446,9 @@ fun SquareApp(
                                 feed = feed,
                                 onOpenItem = { item ->
                                     viewModel.openContext(item.uri, item.title, item.artworkUrl)
-                                    navController.navigate(Routes.PLAYLIST)
+                                    if (navController.currentDestination?.route != Routes.PLAYLIST) {
+                                        navController.navigate(Routes.PLAYLIST)
+                                    }
                                 },
                                 backdrop = artBackdrop,
                                 youtubeMode =
@@ -1576,7 +1583,9 @@ fun SquareApp(
                                     // having back as much as a song is.
                                     viewModel.recordSearchOpen(item)
                                     viewModel.openContext(item.uri, item.title, item.artworkUrl)
-                                    navController.navigate(Routes.PLAYLIST)
+                                    if (navController.currentDestination?.route != Routes.PLAYLIST) {
+                                        navController.navigate(Routes.PLAYLIST)
+                                    }
                                 },
                                 onLoadMore = viewModel::loadMoreSearch,
                                 backdrop = artBackdrop,
@@ -1605,7 +1614,9 @@ fun SquareApp(
                                         artist.title,
                                         artist.artworkUrl,
                                     )
-                                    navController.navigate(Routes.PLAYLIST)
+                                    if (navController.currentDestination?.route != Routes.PLAYLIST) {
+                                        navController.navigate(Routes.PLAYLIST)
+                                    }
                                 },
                                 backdrop = artBackdrop,
                             )
@@ -2843,7 +2854,9 @@ fun SquareApp(
                                 },
                                 onOpenUri = { uri, name ->
                                     viewModel.openContext(uri, name)
-                                    navController.navigate(Routes.PLAYLIST)
+                                    if (navController.currentDestination?.route != Routes.PLAYLIST) {
+                                        navController.navigate(Routes.PLAYLIST)
+                                    }
                                 },
                                 onAddToPlaylist = {
                                     viewModel.openAddToPlaylist(
@@ -3564,7 +3577,9 @@ private fun RowScope.BottomItem(
 /** Loads the playlist and shows it, from whichever tab asked. */
 private fun NavHostController.openPlaylist(viewModel: MainViewModel, playlist: CatalogPlaylist) {
     viewModel.openPlaylist(playlist)
-    navigate(Routes.PLAYLIST)
+    if (currentDestination?.route != Routes.PLAYLIST) {
+        navigate(Routes.PLAYLIST)
+    }
 }
 
 /**

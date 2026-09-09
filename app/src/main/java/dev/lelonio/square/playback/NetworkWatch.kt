@@ -74,6 +74,15 @@ class NetworkWatch(context: Context, private val scope: CoroutineScope) {
         pending?.cancel()
         if (connected) {
             OfflineMode.setNoSession(false)
+            // If connected to a high-speed unmetered connection (e.g. WiFi or Ethernet),
+            // auto-recover from slow/unstable cellular fallback.
+            val network = connectivity?.activeNetwork
+            val capabilities = network?.let { connectivity.getNetworkCapabilities(it) }
+            if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true ||
+                capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true
+            ) {
+                OfflineMode.setSlow(false)
+            }
             return
         }
         pending = scope.launch {

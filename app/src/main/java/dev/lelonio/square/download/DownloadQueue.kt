@@ -598,22 +598,20 @@ class DownloadQueue(
     }
 
     /** Null when downloading may go ahead, otherwise what it is waiting for. */
-    private fun allowed(): Waiting? = when (_link.value) {
-        Link.NONE -> Waiting.NETWORK
-        Link.METERED -> if (settings.wifiOnly.value) Waiting.WIFI else null
-        Link.UNMETERED -> null
+    private fun allowed(): Waiting? {
+        if (dev.lelonio.square.playback.OfflineMode.active.value) return Waiting.NETWORK
+        return when (_link.value) {
+            Link.NONE -> Waiting.NETWORK
+            Link.METERED -> if (settings.wifiOnly.value) Waiting.WIFI else null
+            Link.UNMETERED -> null
+        }
     }
 
     private suspend fun awaitAllowed() {
-        // Suspend without polling: combine both state flows and resume the
-        // moment either changes to a state that permits downloading.
-        //
-        // The old implementation polled every NETWORK_POLL_MS (1 500 ms) in a
-        // busy-wait loop even when neither the link nor the WiFi setting had
-        // moved — burning CPU and preventing the coroutine from suspending
-        // cleanly. combine() + first() gives us the same semantic — "wait until
-        // downloading is allowed" — at zero steady-state cost.
-        combine(_link, settings.wifiOnly) { link, wifiOnly ->
+        // Suspend without polling: combine state flows and resume the
+        // moment conditions permit downloading.
+        combine(_link, settings.wifiOnly, dev.lelonio.square.playback.OfflineMode.active) { link, wifiOnly, offline ->
+            if (offline) return@combine false
             when (link) {
                 Link.NONE     -> false
                 Link.METERED  -> !wifiOnly

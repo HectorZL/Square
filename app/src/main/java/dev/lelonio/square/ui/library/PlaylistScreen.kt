@@ -249,8 +249,8 @@ fun PlaylistScreen(
     storedSortDescending: Boolean = false,
     onSortDescendingChange: (Boolean) -> Unit = {},
 ) {
-    var query by remember { mutableStateOf("") }
-    var searching by remember { mutableStateOf(false) }
+    var query by remember(state.uri) { mutableStateOf("") }
+    var searching by remember(state.uri) { mutableStateOf(false) }
     // Opening and closing the field, as one number.
     //
     // The field used to appear and disappear on the frame the button was
@@ -489,7 +489,10 @@ fun PlaylistScreen(
     // list, so a single gesture closes the cover and then carries on into the
     // tracks.
     val collapseRange = with(density) { (heroHeight - collapsedHeight).toPx() }
-    var collapsed by remember { mutableFloatStateOf(0f) }
+    var collapsed by remember(state.uri) { mutableFloatStateOf(0f) }
+    LaunchedEffect(state.uri) {
+        listState.scrollToItem(0)
+    }
     val collapseFraction = { (collapsed / collapseRange).coerceIn(0f, 1f) }
 
     // How much of a drag the header itself uses up, closing on the way up and
@@ -630,6 +633,7 @@ fun PlaylistScreen(
                 collapsedPx = collapsedPx,
                 collapse = collapseFraction,
                 imageAspect = state.heroAspect,
+                pending = state.heroPending,
             )
         }
 
@@ -881,6 +885,16 @@ fun PlaylistScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                } else if (popularReleases.isEmpty() && !state.loading) {
+                    item(contentType = "status") {
+                        StatusBox {
+                            Text(
+                                stringResource(R.string.no_tracks),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
 
@@ -1724,6 +1738,7 @@ private fun HeroArt(
     collapse: () -> Float,
     /** The picture's own proportions, where the catalogue gave them. */
     imageAspect: Float? = null,
+    pending: Boolean = false,
 ) {
     // The picture and its fade are the same everywhere the app shows a cover
     // large — here and in the player; see HeroBackdrop. What belongs to this
@@ -1734,6 +1749,7 @@ private fun HeroArt(
         pageColor = pageColor,
         motionUrl = motionUrl,
         imageAspect = imageAspect,
+        pending = pending,
         // Measured against the reference rather than chosen.
         //
         // Ours was flat page colour by 38% of the way down the screen; theirs

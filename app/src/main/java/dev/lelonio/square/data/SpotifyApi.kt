@@ -144,7 +144,7 @@ interface SpotifyApi {
     @GET("v1/artists/{id}/top-tracks")
     suspend fun artistTopTracks(
         @Path("id") artistId: String,
-        @Query("market") market: String = "from_token",
+        @Query("market") market: String,
     ): TopTracksDto
 
     @GET("v1/artists/{id}/albums")
@@ -152,6 +152,7 @@ interface SpotifyApi {
         @Path("id") artistId: String,
         @Query("include_groups") groups: String = "album,single",
         @Query("limit") limit: Int = 20,
+        @Query("market") market: String? = null,
     ): PageDto<AlbumDto>
 
     @GET("v1/artists/{id}/related-artists")

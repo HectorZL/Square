@@ -83,13 +83,14 @@ object ApiFactory {
             val path = url.encodedPath
 
             if (url.queryParameter("market") == null && shouldAddMarket(path)) {
-                val country = countryProvider().takeIf { it.isNotBlank() }
-                if (country != null) {
-                    val newUrl = url.newBuilder()
-                        .addQueryParameter("market", country)
-                        .build()
-                    return chain.proceed(request.newBuilder().url(newUrl).build())
-                }
+                val raw = countryProvider()
+                val country = raw.takeIf { it.length == 2 && it.all(Char::isLetter) && it != "from_token" }
+                    ?: java.util.Locale.getDefault().country.takeIf { it.length == 2 && it.all(Char::isLetter) }
+                    ?: "US"
+                val newUrl = url.newBuilder()
+                    .addQueryParameter("market", country.uppercase())
+                    .build()
+                return chain.proceed(request.newBuilder().url(newUrl).build())
             }
             return chain.proceed(request)
         }
@@ -97,6 +98,7 @@ object ApiFactory {
         private fun shouldAddMarket(path: String): Boolean {
             return (path.startsWith("/v1/playlists/") && path.endsWith("/tracks")) ||
                 (path.startsWith("/v1/artists/") && path.endsWith("/top-tracks")) ||
+                (path.startsWith("/v1/artists/") && path.endsWith("/albums")) ||
                 path.startsWith("/v1/albums/") ||
                 path.startsWith("/v1/tracks/") ||
                 path == "/v1/search"

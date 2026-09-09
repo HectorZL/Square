@@ -88,19 +88,13 @@ fun Artwork(
             DownloadsCover()
         } else if (url == dev.lelonio.square.data.LocalLibrary.COVER) {
             LocalFilesCover()
-        } else if (url != null && (!offlineOnly() || isOnThisPhone(url))) {
-            // Offline the url is not something that can be fetched, so what is
-            // handed to the loader is the copy on the disk. Online the url
-            // stays: covers are kept keyed on the picture rather than its size,
-            // so the file behind a url may be a smaller print of it, and a page
-            // that can fetch the large one should — unless a small decode target
-            // is set, in which case requesting the 300 px print from Spotify's
-            // CDN avoids transferring 640 px just to throw most of it away.
+        } else if (url != null) {
+            // Offline the url is not something that can be fetched over network,
+            // so network cache is disabled but disk and memory cache remain enabled,
+            // allowing already cached covers to be shown offline.
             val densityVal = density
             val source = remember(url, decodeSize) {
                 val base = artSource(url)
-                // Only resize when: online (artSource returned the url itself),
-                // AND a decode target is set that fits within the small print.
                 if (base is String && decodeSize > 0.dp) {
                     val targetPx = with(densityVal) { decodeSize.toPx() }.roundToInt()
                     spotifyResizedUrl(base, targetPx)
@@ -110,35 +104,31 @@ fun Artwork(
                 ImageRequest.Builder(context)
                     .data(source)
                     .scale(Scale.FILL)
+                    .networkCachePolicy(
+                        if (offlineOnly() && !isOnThisPhone(url)) coil.request.CachePolicy.DISABLED
+                        else coil.request.CachePolicy.ENABLED,
+                    )
+                    .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+                    .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
                     .apply {
                         if (decodeSize > 0.dp) {
                             val px = with(density) { decodeSize.toPx() }.roundToInt()
                             size(px, px)
                         }
                     }
-                    // The fade is done here rather than by the loader; see
-                    // below.
                     .crossfade(false)
                     .build()
             }
 
-            // Faded in by hand, and deliberately.
-            //
-            // The loader's own crossfade is skipped whenever the picture comes
-            // out of memory — which, since the next song's cover is fetched
-            // while the current one plays, is exactly the case that matters:
-            // the artwork appeared with a cut while everything around it was
-            // still animating, and arrived before the colour it is supposed to
-            // bring with it. An animation of our own does not care where the
-            // bytes came from.
             var arrived by remember(source) { mutableStateOf(false) }
+            var failed by remember(source) { mutableStateOf(false) }
             val appear by animateFloatAsState(
                 targetValue = if (arrived || crossfadeMs <= 0) 1f else 0f,
                 animationSpec = tween(crossfadeMs),
                 label = "artwork",
             )
 
-            if (fallback && !arrived) {
+            if (fallback && failed) {
                 GeneratedCover(title, corner)
             }
 
@@ -147,7 +137,16 @@ fun Artwork(
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 onState = { state ->
-                    if (state is coil.compose.AsyncImagePainter.State.Success) arrived = true
+                    when (state) {
+                        is coil.compose.AsyncImagePainter.State.Success -> {
+                            arrived = true
+                            failed = false
+                        }
+                        is coil.compose.AsyncImagePainter.State.Error -> {
+                            failed = true
+                        }
+                        else -> {}
+                    }
                 },
                 modifier = Modifier
                     .fillMaxSize()
