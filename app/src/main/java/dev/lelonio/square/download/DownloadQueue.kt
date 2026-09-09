@@ -582,15 +582,16 @@ class DownloadQueue(
         val capabilities = manager.activeNetwork
             ?.let(manager::getNetworkCapabilities)
             ?: return Link.NONE
-        if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+        val hasInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        val validated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        val isWifi = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+        val isEthernet = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+        val isCellular = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+
+        if (!hasInternet && !validated && !isWifi && !isEthernet && !isCellular) {
             return Link.NONE
         }
-        // Not validated means a captive portal or a network that is up but goes
-        // nowhere. Treated as no network, because that is what it is for us.
-        if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
-            return Link.NONE
-        }
-        return if (capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) {
+        return if (capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) || isWifi || isEthernet) {
             Link.UNMETERED
         } else {
             Link.METERED

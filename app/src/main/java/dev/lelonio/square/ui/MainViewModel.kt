@@ -2325,10 +2325,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun retryOnline(): Boolean {
         container.downloadSettings.setOfflineMode(false)
         withContext(Dispatchers.IO) {
+            runCatching { NativeBridge.setOfflineOnly(false) }
             runCatching { NativeBridge.reconnect() }
                 .onFailure { android.util.Log.w(TAG, "retry failed: ${describe(it)}") }
         }
-        val offline = runCatching { NativeBridge.isOffline }.getOrDefault(true)
+        val offline = runCatching { NativeBridge.isOffline }.getOrDefault(false)
         dev.lelonio.square.playback.OfflineMode.setNoSession(offline)
         dev.lelonio.square.playback.OfflineMode.setSlow(false)
         if (!offline) {

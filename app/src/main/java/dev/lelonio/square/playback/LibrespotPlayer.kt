@@ -196,18 +196,6 @@ class LibrespotPlayer(
                 runCatching { dev.lelonio.square.nativecore.NativeBridge.setBitrate(kbps) }
             }
         },
-        onUnstable = {
-            handler.post {
-                if (released) return@post
-                android.util.Log.w(
-                    "SquarePlayer",
-                    "Network unstable: switching to offline/cached mode and skipping unstreamable tracks",
-                )
-                dev.lelonio.square.playback.OfflineMode.setSlow(true)
-                runCatching { dev.lelonio.square.nativecore.NativeBridge.setOfflineOnly(true) }
-                skipToNextPlayable()
-            }
-        },
     )
 
     /**
@@ -226,16 +214,14 @@ class LibrespotPlayer(
     }
 
     /**
-     * Watches for tracks that take too long to begin playback over an unstable network.
+     * Watches for tracks that take too long to begin playback.
      */
     private val loadTimeoutWatch = Runnable {
         if (!loadInFlight) return@Runnable
         val currentUri = queue.items.getOrNull(queue.currentIndex)?.uri
-        android.util.Log.w("SquarePlayer", "Track load timed out for $currentUri (network unstable)")
+        android.util.Log.w("SquarePlayer", "Track load timed out for $currentUri, skipping")
         loadInFlight = false
         bandwidth.loadFailed(currentUri)
-        dev.lelonio.square.playback.OfflineMode.setSlow(true)
-        runCatching { dev.lelonio.square.nativecore.NativeBridge.setOfflineOnly(true) }
         skipToNextPlayable()
     }
 
