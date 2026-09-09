@@ -566,7 +566,7 @@ class DownloadStore(context: Context) {
         val claimed = current.owners.values.flatten().toSet()
 
         val orphaned = current.files.keys.filterNot(claimed::contains)
-        val strandedTracks = current.tracks.keys.filterNot(claimed::contains)
+        val strandedTracks = current.tracks.keys.filterNot { claimed.contains(it) || current.files.containsKey(it) }
         if (orphaned.isEmpty() && strandedTracks.isEmpty()) return@withLock emptyList()
 
         publish(

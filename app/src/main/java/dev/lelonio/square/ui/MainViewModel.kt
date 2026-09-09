@@ -1905,22 +1905,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // ninety on the phone is a shelf that lies. The playlists are listed
         // beside it either way, so this is the one place that answers "what can
         // I play right now" without picking through them.
-        val shelf = container.downloads.files.value.keys.takeIf { it.isNotEmpty() }?.let {
-            CatalogPlaylist(
-                uri = DownloadStore.SINGLES,
-                name = string(R.string.downloaded_tracks),
-                artworkUrl = dev.lelonio.square.ui.components.DOWNLOADS_COVER,
-            )
-        }
-        val everything = listOfNotNull(shelf) + labelled
-        if (everything.isEmpty()) return null
+        val everything = labelled
+        if (everything.isEmpty() && container.downloads.files.value.isEmpty()) return null
 
         android.util.Log.i(TAG, "offline library: ${everything.size} downloaded")
         // The name and the picture from the last time there was a connection.
         // They cost nothing to keep and their absence reads as being signed
         // out, which is not what has happened.
         val (name, avatar) = container.preferences.profile()
-        // The phone's own files belong here as much as they do online.
+        // The downloaded music shelf belongs here as much as it does online.
         return UiState.Ready(name, withLocalFiles(everything), avatarUrl = avatar)
     }
 
@@ -1936,25 +1929,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         withLocalFiles(container.activeBackend.playlists())
 
     /**
-     * The phone's own music, at the head of whichever library is on screen.
-     *
-     * Not a third service to switch to: a file on this phone is there whether
-     * the listener is on Spotify or on YouTube Music, exactly as it is in
-     * Spotify's own client, so it belongs in both libraries rather than behind
-     * a setting that swaps one for the other.
-     *
-     * Shown whether or not the permission has been given. Hiding it until then
-     * would leave the listener nowhere to say yes: the shelf is where the
-     * asking happens.
+     * Downloaded music on this phone, at the head of whichever library is on screen.
      */
     private fun withLocalFiles(playlists: List<CatalogPlaylist>): List<CatalogPlaylist> =
         listOf(
             CatalogPlaylist(
-                uri = LocalLibrary.CONTEXT_URI,
+                uri = DownloadStore.SINGLES,
                 name = string(R.string.local_files),
-                artworkUrl = LocalLibrary.COVER,
+                artworkUrl = dev.lelonio.square.ui.components.DOWNLOADS_COVER,
             ),
-        ) + playlists.filterNot { it.uri == LocalLibrary.CONTEXT_URI }
+        ) + playlists.filterNot { it.uri == DownloadStore.SINGLES || it.uri == LocalLibrary.CONTEXT_URI }
 
     /** Covers already looked up, so a second visit to the home page is free. */
     private val coverCache = mutableMapOf<String, String>()
@@ -2951,29 +2935,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // the home page should keep at the front.
         container.playlistOrder.record(playlist.uri)
 
-        // The phone's own music answers for itself: no service to ask, no
-        // snapshot to compare, and nothing worth keeping on disk about files
-        // that are already on disk.
-        if (LocalLibrary.isLocalContext(playlist.uri)) {
-            openLocalFiles(playlist)
-            return
-        }
-
-        // The shelf of downloaded songs is not a context at all: its uri
-        // belongs to this app rather than to Spotify, and asking the access
-        // point to resolve it answered "invalid argument". This app keeps the
-        // list, so this app answers for it — online as much as offline, and
-        // with everything on the phone rather than only the loose songs.
-        if (playlist.uri == DownloadStore.SINGLES) {
-            // Newest first: a shelf of everything is read from the top, and
-            // what was just downloaded is what somebody came looking for.
-            openDownloadedContext(
-                playlist,
-                container.downloads.files.value
-                    .entries
-                    .sortedByDescending { it.value.downloadedAt }
-                    .map { it.key },
-            )
+        // The shelf of downloaded songs contains all songs downloaded to the phone.
+        if (playlist.uri == DownloadStore.SINGLES || LocalLibrary.isLocalContext(playlist.uri)) {
+            openDownloadedTracks(playlist)
             return
         }
 
@@ -3158,10 +3122,103 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * it is the only case in the app where an empty list is something to act
      * on rather than to report.
      */
+    /**
+     * All songs downloaded to this phone, sorted newest first, updated live as downloads complete.
+     */
+    private fun openDownloadedTracks(playlist: CatalogPlaylist) {
+        playlistJob?.cancel()
+        val name = playlist.name.ifEmpty { string(R.string.local_files) }
+        val base = PlaylistState(
+            uri = DownloadStore.SINGLES,
+            name = name,
+            artworkUrl = dev.lelonio.square.ui.components.DOWNLOADS_COVER,
+            kind = DetailKind.PLAYLIST,
+            mine = false,
+        )
+
+        // Snapshot of downloads right now so the user sees songs with 0 delay
+        val filesSnapshot = container.downloads.files.value
+        val uris = filesSnapshot.entries
+            .sortedByDescending { it.value.downloadedAt }
+            .map { it.key }
+
+        val knownTracks = uris.mapNotNull { container.downloads.trackOf(it) }.associateBy { it.uri }
+        val immediateTracks = uris.map { uri ->
+            knownTracks[uri] ?: CatalogTrack(
+                uri = uri,
+                name = uri.substringAfterLast(':'),
+                artist = "",
+            )
+        }
+        val missingInitial = uris.filter { knownTracks[it] == null }
+
+        publishPlaylist(
+            base.copy(
+                tracks = immediateTracks,
+                loading = missingInitial.isNotEmpty(),
+            ),
+        )
+
+        playlistJob = viewModelScope.launch {
+            if (missingInitial.isNotEmpty() && !dev.lelonio.square.playback.OfflineMode.active.value) {
+                runCatching {
+                    val fetched = withContext(Dispatchers.IO) {
+                        Catalog.tracks(missingInitial)
+                    }
+                    if (fetched.isNotEmpty()) {
+                        container.downloads.rememberTracks(fetched)
+                    }
+                }
+            }
+
+            // Observe downloads flow in real time while this screen is open
+            container.downloads.files.collect { currentFiles ->
+                val currentUris = currentFiles.entries
+                    .sortedByDescending { it.value.downloadedAt }
+                    .map { it.key }
+
+                val missing = currentUris.filter { container.downloads.trackOf(it) == null }
+                if (missing.isNotEmpty() && !dev.lelonio.square.playback.OfflineMode.active.value) {
+                    runCatching {
+                        val fetched = withContext(Dispatchers.IO) {
+                            Catalog.tracks(missing)
+                        }
+                        if (fetched.isNotEmpty()) {
+                            container.downloads.rememberTracks(fetched)
+                        }
+                    }
+                }
+
+                val currentKnown = currentUris.mapNotNull { container.downloads.trackOf(it) }.associateBy { it.uri }
+                val updatedTracks = currentUris.map { uri ->
+                    currentKnown[uri] ?: CatalogTrack(
+                        uri = uri,
+                        name = uri.substringAfterLast(':'),
+                        artist = "",
+                    )
+                }
+
+                publishPlaylist(
+                    base.copy(
+                        tracks = updatedTracks,
+                        loading = false,
+                    ),
+                )
+            }
+        }
+    }
+
     /** A downloaded list, read out of the index rather than off the network. */
     private fun openDownloadedContext(playlist: CatalogPlaylist, wanted: List<String>) {
         playlistJob?.cancel()
         val label = container.downloads.labelOf(playlist.uri)
+        val resolvedTracks = wanted.map { uri ->
+            container.downloads.trackOf(uri) ?: CatalogTrack(
+                uri = uri,
+                name = uri.substringAfterLast(':'),
+                artist = "",
+            )
+        }
         publishPlaylist(
             PlaylistState(
                 uri = playlist.uri,
@@ -3172,7 +3229,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     DownloadStore.KIND_ARTIST -> DetailKind.ARTIST
                     else -> DetailKind.PLAYLIST
                 },
-                tracks = wanted.mapNotNull(container.downloads::trackOf),
+                tracks = resolvedTracks,
             ),
         )
     }
@@ -3182,11 +3239,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val base = PlaylistState(
             uri = playlist.uri,
             name = playlist.name,
-            // The shelf's own tile, drawn rather than fetched; see Artwork.
             artworkUrl = playlist.artworkUrl ?: LocalLibrary.COVER,
             kind = DetailKind.PLAYLIST,
-            // Nothing here belongs to an account, so none of what a playlist
-            // page offers applies: no following, no editing, no removing.
             mine = false,
         )
         publishPlaylist(base.copy(loading = true))
@@ -3208,11 +3262,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun onLocalPermissionAnswered() {
         val open = _playlist.value
         if (!LocalLibrary.isLocalContext(open.uri)) return
-        openLocalFiles(
+        openDownloadedTracks(
             CatalogPlaylist(
                 uri = open.uri.orEmpty(),
                 name = open.name,
-                artworkUrl = LocalLibrary.COVER,
+                artworkUrl = dev.lelonio.square.ui.components.DOWNLOADS_COVER,
             ),
         )
     }

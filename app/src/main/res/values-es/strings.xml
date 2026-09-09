@@ -360,7 +360,7 @@
     <string name="download_artist_confirm">¿Descargar %1$d canciones de %2$s? Son unos %3$s.</string>
     <string name="download_failed_count">%1$d no se pudieron descargar</string>
     <string name="download_retry_failed">Reintentar</string>
-    <string name="downloaded_tracks">Canciones descargadas</string>
+    <string name="downloaded_tracks">Música descargada</string>
     <string name="offline_mode">Modo sin conexión</string>
     <string name="offline_mode_note">Reproduce solo lo descargado, sin pedirle nada a Spotify.</string>
     <string name="offline_banner_manual">Sin conexión — lo activaste tú</string>
