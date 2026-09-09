@@ -86,7 +86,24 @@ object DownloadExtras {
 
     // ------------------------------------------------------------ the answers
 
-    fun rememberLyrics(trackUri: String, raw: String) = remember("lyrics", trackUri, raw)
+    fun rememberLyrics(trackUri: String, raw: String) {
+        if (raw.isBlank()) return
+        val file = fileFor("lyrics", trackUri) ?: return
+        runCatching {
+            file.parentFile?.mkdirs()
+            file.writeText(raw)
+            pruneExcessLyrics(file.parentFile)
+        }
+    }
+
+    private fun pruneExcessLyrics(dir: File?) {
+        val files = dir?.listFiles() ?: return
+        if (files.size > 500) {
+            files.sortedBy { it.lastModified() }
+                .take(50)
+                .forEach { runCatching { it.delete() } }
+        }
+    }
 
     fun lyrics(trackUri: String): String? = recall("lyrics", trackUri)
 

@@ -136,7 +136,9 @@ fn tune_fetching() {
         // a second of waiting on every track; half of one is still several
         // blocks at this size.
         read_ahead_before_playback: Duration::from_millis(500),
-        read_ahead_during_playback: Duration::from_secs(5),
+        // Keep 30 seconds of audio decoded and cached ahead during playback to
+        // cushion against cellular dropouts, elevator rides, and cell handoffs.
+        read_ahead_during_playback: Duration::from_secs(30),
         prefetch_threshold_factor: 4.0,
         // A block that has not arrived in fifteen seconds is not going to.
         download_timeout: Duration::from_secs(15),
@@ -1511,8 +1513,8 @@ static CONTEXT_URI: Mutex<String> = Mutex::new(String::new());
 /// [`preload_after`].
 static QUEUE: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-/// How much of the phone the cached audio may take: 512 MB.
-const AUDIO_CACHE_LIMIT: u64 = 512 * 1024 * 1024;
+/// How much of the phone the cached audio may take: 1024 MB (1 GB).
+const AUDIO_CACHE_LIMIT: u64 = 1024 * 1024 * 1024;
 
 /// Deletes the temporary files left behind by downloads that never finished.
 ///

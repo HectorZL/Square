@@ -267,8 +267,8 @@ fun SettingsScreen(
             QualitySection()
         }
 
-        // Also librespot's: the crossfade is mixed by the engine's own player.
-        if (open == SettingsPage.Playback && showSpotify) item("crossfade") {
+        // Crossfade: mixed by the engine on Spotify, volume-shaped on YouTube Music.
+        if (open == SettingsPage.Playback) item("crossfade") {
             CrossfadeSection()
         }
 
