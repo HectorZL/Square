@@ -161,6 +161,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val appearsOn: List<SearchItem> = emptyList(),
         /** The playlists Spotify built around them, "This Is" first. */
         val artistPlaylists: List<SearchItem> = emptyList(),
+        /** Fans also like / related artists. */
+        val relatedArtists: List<SearchItem> = emptyList(),
+        /** Whether the artist is verified. */
+        val verified: Boolean = true,
+        /** Formatted monthly listeners string, e.g. "14.3 M oyentes mensuales". */
+        val monthlyListeners: String? = null,
         /**
          * The record they put out last, for the card under the artist's photo.
          *
@@ -3088,6 +3094,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             singles = page.singles,
                             appearsOn = page.appearsOn,
                             artistPlaylists = page.playlists,
+                            relatedArtists = page.relatedArtists,
+                            verified = true,
+                            monthlyListeners = page.monthlyListeners,
                             followers = page.followers,
                             genres = page.genres,
                             following = _playlist.value.following,
@@ -3988,8 +3997,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val singles: List<SearchItem>,
         val appearsOn: List<SearchItem>,
         val playlists: List<SearchItem>,
+        val relatedArtists: List<SearchItem>,
         val followers: Int,
         val genres: List<String>,
+        val monthlyListeners: String?,
     )
 
     private suspend fun loadArtist(uri: String): ArtistPage {
@@ -4046,10 +4057,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         fun shelf(vararg groups: String): List<SearchItem> = releases
             .filter { it.albumGroup in groups }
             .mapNotNull { album ->
+                val year = album.releaseDate?.take(4).orEmpty()
+                val type = when (album.albumGroup) {
+                    "single" -> if (album.totalTracks > 1) "EP" else "Sencillo"
+                    "album" -> "Álbum"
+                    "compilation" -> "Recopilación"
+                    else -> ""
+                }
+                val subtitle = if (type.isNotEmpty() && year.isNotEmpty()) "$type • $year" else year.ifEmpty { type }
                 SearchItem(
                     uri = album.uri ?: return@mapNotNull null,
                     title = album.name,
-                    subtitle = album.releaseDate?.take(4).orEmpty(),
+                    subtitle = subtitle,
                     artworkUrl = album.images.firstOrNull()?.url,
                 )
             }
@@ -4081,15 +4100,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .maxByOrNull { it.releaseDate.orEmpty() }
             ?.let { album ->
                 album.uri?.let { uri ->
+                    val year = album.releaseDate?.take(4).orEmpty()
+                    val type = when (album.albumGroup) {
+                        "single" -> if (album.totalTracks > 1) "EP" else "Sencillo"
+                        "album" -> "Álbum"
+                        else -> "Lanzamiento"
+                    }
+                    val dateLabel = if (year.isNotEmpty()) "$type • $year" else album.releaseDate.orEmpty()
                     ArtistRelease(
                         uri = uri,
                         title = album.name,
                         artworkUrl = album.images.firstOrNull()?.url,
-                        releaseDate = album.releaseDate.orEmpty(),
+                        releaseDate = dateLabel,
                         trackCount = album.totalTracks,
                     )
                 }
             }
+
+        val related = runCatching {
+            container.api.artistRelatedArtists(id).artists.mapNotNull { rel ->
+                val rUri = rel.uri ?: return@mapNotNull null
+                SearchItem(
+                    uri = rUri,
+                    title = rel.name,
+                    subtitle = "",
+                    artworkUrl = rel.images.firstOrNull()?.url,
+                )
+            }
+        }.onFailure {
+            android.util.Log.w(TAG, "related artists failed for $id: ${describe(it)}")
+        }.getOrElse { emptyList() }
+
+        val followersCount = artist?.followers?.total ?: 0
+        val monthlyListenersFormatted = if (followersCount > 0) {
+            when {
+                followersCount >= 1_000_000 -> String.format(java.util.Locale.US, "%.1f M oyentes mensuales", followersCount / 1_000_000.0)
+                followersCount >= 1_000 -> String.format(java.util.Locale.US, "%.1f K oyentes mensuales", followersCount / 1_000.0)
+                else -> "$followersCount oyentes mensuales"
+            }
+        } else null
 
         return ArtistPage(
             playlists = artistPlaylists(artist?.name.orEmpty()),
@@ -4098,8 +4147,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             albums = shelf("album", "compilation"),
             singles = shelf("single"),
             appearsOn = shelf("appears_on"),
-            followers = artist?.followers?.total ?: 0,
+            relatedArtists = related,
+            followers = followersCount,
             genres = artist?.genres.orEmpty(),
+            monthlyListeners = monthlyListenersFormatted,
         )
     }
 

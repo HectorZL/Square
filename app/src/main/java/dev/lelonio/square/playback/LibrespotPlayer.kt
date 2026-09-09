@@ -768,13 +768,14 @@ class LibrespotPlayer(
             onPlaybackActive(true)
         } else {
             wantPlay = false
-            engine("pause") { NativeBridge.pause() }
+            this.playWhenReady = false
             onPlaybackActive(false)
             focus.abandonFocus()
+            engine("pause") { NativeBridge.pause() }
+            invalidateState()
         }
-        // Do not update local state here: the engine confirms via onEvent, and
-        // reporting "playing" before audio actually starts makes the seek bar
-        // run ahead of the sound.
+        // For play, do not update local state prematurely: the engine confirms via onEvent,
+        // and reporting "playing" before audio actually starts makes the seek bar run ahead.
         return Futures.immediateVoidFuture()
     }
 

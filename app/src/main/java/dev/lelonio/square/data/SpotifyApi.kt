@@ -154,6 +154,9 @@ interface SpotifyApi {
         @Query("limit") limit: Int = 20,
     ): PageDto<AlbumDto>
 
+    @GET("v1/artists/{id}/related-artists")
+    suspend fun artistRelatedArtists(@Path("id") artistId: String): RelatedArtistsDto
+
     /**
      * The three below exist for one field each: the picture at the top of a
      * page opened by name alone.
@@ -498,6 +501,9 @@ data class AlbumDto(
 
 @Serializable
 data class TopTracksDto(val tracks: List<TrackDto> = emptyList())
+
+@Serializable
+data class RelatedArtistsDto(val artists: List<ArtistDto> = emptyList())
 
 /** One entry of the account's play history: the track and where it was played from. */
 @Serializable
