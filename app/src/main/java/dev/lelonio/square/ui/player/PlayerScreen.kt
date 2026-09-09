@@ -111,6 +111,7 @@ import com.adamglin.phosphoricons.fill.SkipBack
 import com.adamglin.phosphoricons.fill.SkipForward
 import com.adamglin.phosphoricons.regular.CaretDown
 import com.adamglin.phosphoricons.regular.Devices
+import com.adamglin.phosphoricons.regular.DotsThree
 import com.adamglin.phosphoricons.regular.Check
 import com.adamglin.phosphoricons.regular.Heart
 import com.adamglin.phosphoricons.regular.Plus
@@ -347,6 +348,8 @@ fun PlayerScreen(
     connectAvailable: Boolean = true,
     /** Whether the sound is coming out of another of the account's devices. */
     onAnotherDevice: Boolean = false,
+    /** Opens the contextual menu sheet for the current track ("…"). */
+    onMore: (() -> Unit)? = null,
 ) {
     var panel by remember { mutableStateOf(PlayerPanel.NONE) }
 
@@ -764,6 +767,7 @@ fun PlayerScreen(
                         onAnotherDevice = onAnotherDevice,
                         onWatchVideo = onWatchVideo,
                         videoOn = videoOn,
+                        onMore = onMore,
                     )
 
                     // Everything sits at the bottom, as in the reference: the
@@ -1539,6 +1543,7 @@ private fun TopBar(
     /** Null when the track has no video to watch. */
     onWatchVideo: (() -> Unit)?,
     videoOn: Boolean,
+    onMore: (() -> Unit)? = null,
 ) {
     Row(
         Modifier
@@ -1633,6 +1638,16 @@ private fun TopBar(
                         onAnotherDevice -> ConnectedInk
                         else -> panelTint(panel == PlayerPanel.DEVICES)
                     },
+                )
+            }
+        }
+        if (onMore != null) {
+            Spacer(Modifier.size(8.dp))
+            GlassButton(backdrop, onClick = onMore) {
+                Icon(
+                    PhosphorIcons.Regular.DotsThree,
+                    contentDescription = stringResource(R.string.more),
+                    tint = GlassInk,
                 )
             }
         }

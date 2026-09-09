@@ -2898,6 +2898,19 @@ fun SquareApp(
                                 videoOn = videoOn || spotifyVideoOn,
                                 videoPlayer = player,
                                 videoAttachKey = spotifyVideoGeneration,
+                                onMore = playback.mediaId?.let { uri ->
+                                    {
+                                        trackMenu = TrackMenuRequest(
+                                            track = CatalogTrack(
+                                                uri = uri,
+                                                name = playback.title,
+                                                artist = playback.artist,
+                                                artworkUrl = playback.artworkUrl,
+                                            ),
+                                            removable = false,
+                                        )
+                                    }
+                                },
                             )
                           }
                         },

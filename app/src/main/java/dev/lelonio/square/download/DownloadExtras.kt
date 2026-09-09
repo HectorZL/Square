@@ -246,19 +246,12 @@ object DownloadExtras {
     /**
      * Fetches and keeps one file. Answers with what is already there.
      *
-     * Uses OkHttp for HTTP/2 connection reuse and pooled connections.
+     * Uses OkHttp for HTTP/2 connection reuse and pooled connections, streaming
+     * with 32 KB buffers directly to a .part file.
      *
-     * For artwork ([kind] == "art") the image is decoded, scaled down to at most
-     * [MAX_ART_PX] on each side, and re-encoded as WEBP_LOSSY quality
-     * [ART_WEBP_QUALITY] before being written. This typically reduces each cover
-     * from ~150 KB (640 px JPEG from Spotify/Apple CDN) to ~30–40 KB with no
-     * visible difference at any size the app uses, saving bandwidth every time a
-     * cover is downloaded and disk space for the lifetime of the library.
-     *
-     * The file is still named .jpg: Android BitmapFactory and Coil both detect
-     * the format from the file's magic bytes, not from the extension, so the
-     * rename is not needed and avoiding it means existing cached files remain
-     * valid without a version bump.
+     * Covers are stored as delivered by the CDN (including 1600 px high-res artwork)
+     * so that full-screen displays on 1080p devices remain sharp and without
+     * re-encoding compression loss.
      */
     suspend fun keep(url: String, kind: String): File? = withContext(Dispatchers.IO) {
         if (url.isBlank()) return@withContext null
@@ -275,39 +268,9 @@ object DownloadExtras {
                 if (!response.isSuccessful) return@runCatching null
                 val body = response.body ?: return@runCatching null
 
-                if (kind == "art") {
-                    // Decode → scale → WebP-compress in memory, then write once.
-                    //
-                    // Reading the full body into a ByteArray costs one allocation
-                    // of ~150 KB; the alternative (streaming into BitmapFactory)
-                    // requires two passes over the stream, which OkHttp does not
-                    // support without buffering it anyway.
-                    val bytes = body.bytes()
-                    val opts = BitmapFactory.Options().apply { inJustDecodeBounds = false }
-                    val raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-                        ?: return@runCatching null  // unreadable image
-
-                    val scaled = scaleBitmapDown(raw, MAX_ART_PX)
-                    // raw and scaled may be the same object when no scaling was needed.
-                    if (scaled !== raw) raw.recycle()
-
-                    part.outputStream().use { out ->
-                        @Suppress("DEPRECATION") // WEBP is fine on API 26+; WEBP_LOSSY needs API 30
-                        val format = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                            Bitmap.CompressFormat.WEBP_LOSSY
-                        } else {
-                            Bitmap.CompressFormat.WEBP
-                        }
-                        scaled.compress(format, ART_WEBP_QUALITY, out)
-                    }
-                    scaled.recycle()
-                } else {
-                    // Videos and other binary files: stream directly with a
-                    // 32 KB buffer so large Canvas clips don't sit in memory.
-                    part.outputStream().buffered(32 * 1024).use { output ->
-                        body.byteStream().buffered(32 * 1024).use { input ->
-                            input.copyTo(output)
-                        }
+                part.outputStream().buffered(32 * 1024).use { output ->
+                    body.byteStream().buffered(32 * 1024).use { input ->
+                        input.copyTo(output)
                     }
                 }
             }

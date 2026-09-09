@@ -264,28 +264,46 @@ fun spotifyResizedUrl(url: String, targetPx: Int): String {
     if (targetPx <= 0) return url
     val id = url.substringAfterLast('/')
     if (id.length != SPOTIFY_ID_LEN || !id.all { it.isDigit() || it in 'a'..'f' }) return url
-    val smallPrefix = when {
-        id.startsWith("ab67616d") -> when {
-            targetPx <= 64  -> "ab67616d00004851"
-            targetPx <= 300 -> "ab67616d00001e02"
+    val family = id.take(8)
+    val rendition = when (family) {
+        "ab67616d" -> when {
+            targetPx <= 64  -> "00004851"
+            targetPx <= 300 -> "00001e02"
             else            -> return url  // 640 px — keep the original URL
         }
-        id.startsWith("ab676161") -> when {
-            targetPx <= 160 -> "ab6761610000f178"
-            targetPx <= 320 -> "ab67616100005174"
+        "ab676161" -> when {
+            targetPx <= 160 -> "0000f178"
+            targetPx <= 320 -> "00005174"
             else            -> return url  // 640 px — keep the original URL
         }
-        else -> return url // Unrecognized Spotify image prefix: leave unmodified
+        else -> return url // Unrecognized Spotify image family: leave unmodified
     }
     val tail = id.drop(SPOTIFY_SIZE_PREFIX_LEN)
-    return url.dropLast(SPOTIFY_ID_LEN) + smallPrefix + tail
+    return url.dropLast(SPOTIFY_ID_LEN) + family + rendition + tail
+}
+
+/**
+ * Resolves a canonical cache key for an image URL.
+ *
+ * Spotify image IDs are 40 hex chars: 16 prefix chars encoding size/rendition,
+ * followed by 24 chars identifying the image. Keying on the last 24 characters
+ * ensures that any size variant (e.g. 64px row thumbnail, 300px list print,
+ * 640px cover) shares the exact same palette and tint in cache.
+ */
+fun canonicalArtworkKey(url: String): String {
+    val id = url.substringAfterLast('/')
+    return if (id.length == SPOTIFY_ID_LEN && id.all { it.isDigit() || it in 'a'..'f' }) {
+        id.takeLast(SPOTIFY_ID_LEN - SPOTIFY_SIZE_PREFIX_LEN)
+    } else {
+        url
+    }
 }
 
 /** Length of a Spotify image ID, in hex characters. */
-private const val SPOTIFY_ID_LEN = 40
+const val SPOTIFY_ID_LEN = 40
 
 /** How many of those characters encode the image size. */
-private const val SPOTIFY_SIZE_PREFIX_LEN = 16
+const val SPOTIFY_SIZE_PREFIX_LEN = 16
 
 /** The shelf of songs downloaded on their own; see DownloadStore.SINGLES. */
 const val DOWNLOADS_COVER = "square:downloads-cover"

@@ -945,7 +945,6 @@ private fun DownloadsSection(backdrop: Backdrop) {
             label = stringResource(R.string.download_liked_songs),
             checked = likedSongs,
             backdrop = backdrop,
-            note = stringResource(R.string.download_liked_songs_note),
             onChange = { enable ->
                 settings.setDownloadLikedSongs(enable)
                 if (enable) {
@@ -1028,7 +1027,6 @@ private fun DownloadSwitch(
     label: String,
     checked: Boolean,
     backdrop: Backdrop,
-    note: String? = null,
     onChange: (Boolean) -> Unit,
 ) {
     Row(
@@ -1039,17 +1037,7 @@ private fun DownloadSwitch(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyLarge)
-            if (note != null) {
-                Text(
-                    note,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = InkDim,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-        }
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         dev.lelonio.square.ui.glass.LiquidToggle(
             selected = { checked },
             onSelect = onChange,
