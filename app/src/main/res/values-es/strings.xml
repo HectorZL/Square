@@ -295,7 +295,7 @@
     <string name="effect_quality_light">Ligera</string>
     <string name="effect_quality_light_note">Lo hace el teléfono. Más amable con los equipos antiguos, más áspera en los ataques.</string>
     <string name="liked_songs">Tus me gusta</string>
-    <string name="local_files">Archivos locales</string>
+    <string name="local_files">Música descargada</string>
     <string name="local_files_needs_permission">Square puede ver la música de este teléfono si le das permiso.</string>
     <string name="local_files_allow">Permitir</string>
     <string name="pinned">Fijada</string>

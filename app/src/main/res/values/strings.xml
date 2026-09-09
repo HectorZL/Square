@@ -316,7 +316,7 @@
     <string name="effect_quality_light">Light</string>
     <string name="effect_quality_light_note">The phone does the work. Kinder to older devices, rougher on attacks.</string>
     <string name="liked_songs">Liked Songs</string>
-    <string name="local_files">Local files</string>
+    <string name="local_files">Downloaded music</string>
     <string name="local_files_needs_permission">Square can see the music on this phone once you allow it.</string>
     <string name="local_files_allow">Allow</string>
     <string name="pinned">Pinned</string>

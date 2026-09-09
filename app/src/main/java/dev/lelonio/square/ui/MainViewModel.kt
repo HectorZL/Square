@@ -3936,10 +3936,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             ?: java.util.Locale.getDefault().country.takeIf { it.length == 2 }
             ?: "US"
         val tracks = runCatching {
-            container.api.artistTopTracks(id, market = market).tracks.map { it.toCatalogTrack() }
+            // "from_token" lets Spotify pick the right market from the
+            // authenticated session — avoiding a mismatch when the account's
+            // country differs from the device locale.
+            val fromToken = runCatching {
+                container.api.artistTopTracks(id, market = "from_token").tracks
+                    .map { it.toCatalogTrack() }
+            }.getOrElse { emptyList() }
+
+            fromToken.ifEmpty {
+                // Try with the detected market as a second attempt.
+                container.api.artistTopTracks(id, market = market).tracks
+                    .map { it.toCatalogTrack() }
+            }
         }.onFailure {
             android.util.Log.w(TAG, "top tracks failed for artist $id: ${describe(it)}")
         }.getOrElse { emptyList() }
+
+        // Last resort: the native librespot bridge can resolve an artist
+        // context and return a track list without needing the Web API market.
+        val resolvedTracks = if (tracks.isEmpty()) {
+            runCatching {
+                Catalog.tracks(Catalog.contextTrackUris(uri).take(20))
+            }.onFailure {
+                android.util.Log.w(TAG, "native artist fallback failed for $id: ${describe(it)}")
+            }.getOrElse { emptyList() }
+        } else {
+            tracks
+        }
 
         // One request for every kind of record rather than three. Spotify says
         // which shelf each one belongs on, and asking per shelf would spend the
@@ -4004,7 +4028,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         return ArtistPage(
             playlists = artistPlaylists(artist?.name.orEmpty()),
-            tracks = tracks,
+            tracks = resolvedTracks,
             latest = latest,
             albums = shelf("album", "compilation"),
             singles = shelf("single"),
