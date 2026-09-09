@@ -66,7 +66,7 @@ interface SpotifyApi {
         @Path("id") playlistId: String,
         @Query("limit") limit: Int = 100,
         @Query("offset") offset: Int = 0,
-        @Query("market") market: String? = null,
+        @Query("market") market: String = "from_token",
     ): PageDto<PlaylistTrackDto>
 
     /**
@@ -144,7 +144,7 @@ interface SpotifyApi {
     @GET("v1/artists/{id}/top-tracks")
     suspend fun artistTopTracks(
         @Path("id") artistId: String,
-        @Query("market") market: String = "US",
+        @Query("market") market: String = "from_token",
     ): TopTracksDto
 
     @GET("v1/artists/{id}/albums")

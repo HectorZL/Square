@@ -1982,7 +1982,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** The account's own Spotify id, once the profile has been read. */
     private var meId: String? = null
     /** The account's country, for endpoints that require market code. */
-    private var userCountry: String? = null
+    private val userCountry: String get() = container.userCountry
 
     private fun loadProfile() = viewModelScope.launch {
         if (!container.webApi.isReady) return@launch
@@ -1998,7 +1998,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // list mine. The id, not the display name — two accounts can
                 // be called the same thing and only one of them owns it.
                 meId = profile.id
-                userCountry = profile.country
+                profile.country?.takeIf { it.isNotBlank() }?.let {
+                    container.preferences.setUserCountry(it)
+                }
                 // And kept on disk, for the next time there is no network to
                 // ask with; see [offlineLibrary].
                 container.preferences.setProfile(
@@ -3555,7 +3557,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val loaded = mutableListOf<CatalogTrack>()
         var offset = 0
         while (true) {
-            val page = container.api.playlistTracks(id, limit = WEB_API_PAGE, offset = offset)
+            val page = container.api.playlistTracks(id, limit = WEB_API_PAGE, offset = offset, market = userCountry)
             // Episodes and delisted tracks come back as a null track, and
             // `is_playable` is false for anything the relinking could not find a
             // licensed copy of here. Keeping those would put items in the queue
@@ -3761,7 +3763,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (firstArtist?.uri != null) {
                 return SearchItem(
                     uri = firstArtist.uri,
-                    title = firstArtist.name ?: name,
+                    title = firstArtist.name.ifBlank { name },
                     subtitle = "",
                     artworkUrl = null,
                 )
@@ -4008,9 +4010,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             error(string(R.string.artist_needs_app))
         }
         val id = uri.substringAfterLast(':')
-        val market = userCountry?.takeIf { it.length == 2 }
-            ?: java.util.Locale.getDefault().country.takeIf { it.length == 2 }
-            ?: "US"
+        val market = userCountry
         val tracks = runCatching {
             // "from_token" lets Spotify pick the right market from the
             // authenticated session — avoiding a mismatch when the account's

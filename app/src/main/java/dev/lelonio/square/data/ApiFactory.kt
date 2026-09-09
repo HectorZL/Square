@@ -40,6 +40,7 @@ object ApiFactory {
     fun create(
         tokens: TokenStore,
         baseClient: OkHttpClient? = null,
+        countryProvider: (() -> String)? = null,
         debug: Boolean = false,
     ): SpotifyApi {
         val client = (baseClient?.newBuilder() ?: OkHttpClient.Builder())
@@ -63,6 +64,43 @@ object ApiFactory {
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(SpotifyApi::class.java)
+    }
+
+    /**
+     * Injects the listener's account market into Spotify catalog endpoints when
+     * no explicit market parameter is present.
+     *
+     * Without a market parameter on endpoints like playlist tracks or album tracks,
+     * Spotify returns the raw catalog item without regional track relinking, which
+     * causes tracks to appear unplayable or missing for users outside the US.
+     */
+    private class MarketInterceptor(
+        private val countryProvider: () -> String,
+    ) : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val request = chain.request()
+            val url = request.url
+            val path = url.encodedPath
+
+            if (url.queryParameter("market") == null && shouldAddMarket(path)) {
+                val country = countryProvider().takeIf { it.isNotBlank() }
+                if (country != null) {
+                    val newUrl = url.newBuilder()
+                        .addQueryParameter("market", country)
+                        .build()
+                    return chain.proceed(request.newBuilder().url(newUrl).build())
+                }
+            }
+            return chain.proceed(request)
+        }
+
+        private fun shouldAddMarket(path: String): Boolean {
+            return (path.startsWith("/v1/playlists/") && path.endsWith("/tracks")) ||
+                (path.startsWith("/v1/artists/") && path.endsWith("/top-tracks")) ||
+                path.startsWith("/v1/albums/") ||
+                path.startsWith("/v1/tracks/") ||
+                path == "/v1/search"
+        }
     }
 
 

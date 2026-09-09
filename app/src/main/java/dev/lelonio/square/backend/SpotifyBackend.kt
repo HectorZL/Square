@@ -158,7 +158,7 @@ class SpotifyBackend(private val container: SquareApplication) : MusicBackend {
     override suspend fun tracksOf(uri: String): List<CatalogTrack> = when {
         uri.startsWith("spotify:artist:") -> {
             check(container.webApi.isReady) { "un artista richiede la tua applicazione Spotify" }
-            container.api.artistTopTracks(uri.substringAfterLast(':')).tracks
+            container.api.artistTopTracks(uri.substringAfterLast(':'), market = container.userCountry).tracks
                 .map { it.toCatalogTrack() }
         }
 
@@ -209,7 +209,7 @@ class SpotifyBackend(private val container: SquareApplication) : MusicBackend {
         val loaded = mutableListOf<CatalogTrack>()
         var offset = 0
         while (true) {
-            val page = container.api.playlistTracks(id, limit = WEB_API_PAGE, offset = offset)
+            val page = container.api.playlistTracks(id, limit = WEB_API_PAGE, offset = offset, market = container.userCountry)
             // Episodes and delisted tracks arrive as a null track, and an
             // unplayable one is something the engine could only skip.
             loaded += page.items.mapNotNull { item ->

@@ -234,10 +234,21 @@ class SquareApplication : Application(), ImageLoaderFactory {
             .build()
     }
 
+    /**
+     * The account's country code (e.g. "ES", "MX", "US"), drawn from the authenticated
+     * account profile and cached in preferences. If the profile hasn't been fetched yet,
+     * falls back to the device's locale country, or "from_token".
+     */
+    val userCountry: String
+        get() = preferences.userCountry?.takeIf { it.length == 2 }
+            ?: java.util.Locale.getDefault().country.takeIf { it.length == 2 }
+            ?: "from_token"
+
     val api: SpotifyApi by lazy {
         ApiFactory.create(
             tokens = webApi.tokens,
             baseClient = sharedHttpClient,
+            countryProvider = { userCountry },
             debug = BuildConfig.DEBUG,
         )
     }

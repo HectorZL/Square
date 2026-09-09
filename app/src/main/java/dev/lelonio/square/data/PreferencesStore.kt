@@ -172,6 +172,18 @@ class PreferencesStore(context: Context) {
         prefs.edit().putString(KEY_SKIPPED_UPDATE, value).apply()
     }
 
+    /** The account's country code, saved from the Spotify profile. */
+    val userCountry: String?
+        get() = prefs.getString(KEY_USER_COUNTRY, null)
+
+    fun setUserCountry(value: String?) {
+        if (value.isNullOrBlank()) {
+            prefs.edit().remove(KEY_USER_COUNTRY).apply()
+        } else {
+            prefs.edit().putString(KEY_USER_COUNTRY, value).apply()
+        }
+    }
+
     private companion object {
         const val FILE_NAME = "square_preferences"
         const val KEY_TRACK_SORT = "track_sort"
@@ -186,5 +198,6 @@ class PreferencesStore(context: Context) {
         const val KEY_PROFILE_ART = "profile_art"
         const val KEY_LAST_UPDATE_CHECK = "last_update_check"
         const val KEY_SKIPPED_UPDATE = "skipped_update"
+        const val KEY_USER_COUNTRY = "user_country"
     }
 }
