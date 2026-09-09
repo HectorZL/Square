@@ -269,7 +269,7 @@ fun SettingsScreen(
 
         // Crossfade: mixed by the engine on Spotify, volume-shaped on YouTube Music.
         if (open == SettingsPage.Playback) item("crossfade") {
-            CrossfadeSection()
+            CrossfadeSection(backdrop)
         }
 
         // Autoplay: automatically append similar tracks when queue reaches the end.
@@ -683,12 +683,16 @@ private fun EffectQualitySection() {
 }
 
 @Composable
-private fun CrossfadeSection() {
+private fun CrossfadeSection(backdrop: Backdrop) {
     val context = LocalContext.current
     val store = remember(context) {
         (context.applicationContext as dev.lelonio.square.SquareApplication).crossfade
     }
+    val preferences = remember(context) {
+        (context.applicationContext as dev.lelonio.square.SquareApplication).preferences
+    }
     val chosen by store.seconds.collectAsStateWithLifecycle()
+    val trimSilence by preferences.trimSilence.collectAsStateWithLifecycle()
 
     Section(stringResource(R.string.crossfade)) {
         CrossfadeSteps.forEachIndexed { index, seconds ->
@@ -702,6 +706,13 @@ private fun CrossfadeSection() {
                 selected = seconds == chosen,
             ) { store.set(seconds) }
         }
+        RowDivider()
+        DownloadSwitch(
+            label = stringResource(R.string.trim_silence),
+            checked = trimSilence,
+            backdrop = backdrop,
+            onChange = preferences::setTrimSilence,
+        )
         RowDivider()
         Text(
             stringResource(R.string.quality_restarts),

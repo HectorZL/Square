@@ -26,8 +26,10 @@ import dev.lelonio.square.ui.EXTRA_CONTEXT_LABEL
 import dev.lelonio.square.ui.EXTRA_CONTEXT_ORDERED
 import dev.lelonio.square.ui.EXTRA_CONTEXT_URI
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -258,6 +260,13 @@ class MediaBrowseTree(
                                 isLiked = !nowLiked,
                             ),
                         )
+                    }
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(
+                            app,
+                            if (nowLiked) dev.lelonio.square.R.string.like_failed else dev.lelonio.square.R.string.unlike_failed,
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
                     }
                 }
             }

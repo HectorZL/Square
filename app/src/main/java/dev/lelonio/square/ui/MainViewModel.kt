@@ -2060,6 +2060,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setAutoplayInfinite(value: Boolean) = container.preferences.setAutoplayInfinite(value)
 
+    /** Silence trimming: whether to trim trailing silence during crossfade. */
+    val trimSilence: StateFlow<Boolean> get() = container.preferences.trimSilence
+
+    fun setTrimSilence(value: Boolean) = container.preferences.setTrimSilence(value)
+
     /**
      * Loads a playlist's tracks.
      *
@@ -2566,6 +2571,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     else container.likedStore.add(trackUri)
                     if (_addToPlaylist.value.trackUri == trackUri) {
                         _addToPlaylist.value = _addToPlaylist.value.copy(liked = !nowLiked)
+                    }
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(
+                            container,
+                            if (nowLiked) R.string.like_failed else R.string.unlike_failed,
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
                     }
                 }
             }

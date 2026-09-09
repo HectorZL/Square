@@ -136,9 +136,8 @@ fn tune_fetching() {
         // a second of waiting on every track; half of one is still several
         // blocks at this size.
         read_ahead_before_playback: Duration::from_millis(500),
-        // Keep 30 seconds of audio decoded and cached ahead during playback to
-        // cushion against cellular dropouts, elevator rides, and cell handoffs.
-        read_ahead_during_playback: Duration::from_secs(30),
+        // Keep 5 seconds of audio decoded and cached ahead during playback.
+        read_ahead_during_playback: Duration::from_secs(5),
         prefetch_threshold_factor: 4.0,
         // A block that has not arrived in fifteen seconds is not going to.
         download_timeout: Duration::from_secs(15),
@@ -987,6 +986,17 @@ pub fn set_bitrate(bitrate_kbps: i32) -> EngineResult<()> {
     Ok(())
 }
 
+/// Changes whether trailing silence near the end of a track triggers early crossfade.
+pub fn set_trim_silence(enabled: bool) -> EngineResult<()> {
+    let mut guard = ENGINE.lock().map_err(|_| "engine mutex poisoned")?;
+    let engine = guard.as_mut().ok_or("engine not started")?;
+    engine.recipe.player_config.trim_silence = enabled;
+    if let Some(bundle) = engine.bundle.as_ref() {
+        bundle.player.set_trim_silence(enabled);
+    }
+    Ok(())
+}
+
 /// Throws away a bundle and builds another one, leaving the runtime and the
 /// audio output alone.
 ///
@@ -1513,8 +1523,8 @@ static CONTEXT_URI: Mutex<String> = Mutex::new(String::new());
 /// [`preload_after`].
 static QUEUE: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-/// How much of the phone the cached audio may take: 1024 MB (1 GB).
-const AUDIO_CACHE_LIMIT: u64 = 1024 * 1024 * 1024;
+/// How much of the phone the cached audio may take: 512 MB.
+const AUDIO_CACHE_LIMIT: u64 = 512 * 1024 * 1024;
 
 /// Deletes the temporary files left behind by downloads that never finished.
 ///

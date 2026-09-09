@@ -426,5 +426,7 @@
     <string name="autoplay">Autoplay</string>
     <string name="autoplay_infinite_title">Infinite Autoplay</string>
     <string name="autoplay_infinite_summary">Keep playing similar tracks when queue ends</string>
+    <string name="trim_silence">Trim silence</string>
+    <string name="trim_silence_summary">Skip trailing silence at track ends during crossfade</string>
     <string name="mood_mixes">Mood Mixes</string>
 </resources>

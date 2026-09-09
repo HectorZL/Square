@@ -653,37 +653,6 @@ fun SquareApp(
         viewModel.lookUpVideo(playback.mediaId)
     }
 
-    // Infinite autoplay: dynamically fetch and append similar tracks from Spotify
-    // radio when reaching the end of the queue.
-    val autoplayInfinite by viewModel.autoplayInfinite.collectAsStateWithLifecycle()
-    var lastAutoplayTrackUri by remember { mutableStateOf<String?>(null) }
-    var autoplayInFlight by remember { mutableStateOf(false) }
-
-    LaunchedEffect(playback.mediaId, playback.hasNext, autoplayInfinite, queue.size) {
-        val currentUri = playback.mediaId
-        if (!autoplayInfinite || currentUri == null || !currentUri.startsWith("spotify:track:")) return@LaunchedEffect
-        // Only trigger if on the last item of the queue and repeat is off
-        if (playback.hasNext || playback.repeatMode != androidx.media3.common.Player.REPEAT_MODE_OFF) return@LaunchedEffect
-        if (currentUri == lastAutoplayTrackUri || autoplayInFlight) return@LaunchedEffect
-
-        lastAutoplayTrackUri = currentUri
-        autoplayInFlight = true
-        try {
-            val stationTracks = viewModel.radioFor(currentUri)
-            val currentUris = (0 until (player?.mediaItemCount ?: 0))
-                .mapNotNull { player?.getMediaItemAt(it)?.mediaId }
-                .toSet()
-            val newTracks = stationTracks.filter { it.uri !in currentUris }
-            if (newTracks.isNotEmpty()) {
-                android.util.Log.i("SquareAutoplay", "Appended ${newTracks.size} autoplay tracks for $currentUri")
-                onEnqueueAll(newTracks)
-            }
-        } catch (t: Throwable) {
-            android.util.Log.w("SquareAutoplay", "Failed to fetch autoplay tracks", t)
-        } finally {
-            autoplayInFlight = false
-        }
-    }
     val devices by viewModel.devices.collectAsStateWithLifecycle()
     val addToPlaylist by viewModel.addToPlaylist.collectAsStateWithLifecycle()
     val trackSort by viewModel.trackSort.collectAsStateWithLifecycle()
@@ -2348,11 +2317,22 @@ fun SquareApp(
                         // the pill would be the same control twice. It stays for
                         // the folded bar, where there is no pill to hold it.
                         standaloneInExpanded = false,
-                        // Search field now lives in SearchScreen, so the tab bar
-                        // never needs to morph into a field — the categories stay
-                        // visible at all times.
-                        searchMode = false,
-                        searchBarContent = null,
+                        // Tapping the search tab grows it into the field, and
+                        // the tabs fold away behind it. Tapping it again puts
+                        // the field away and leaves the results; see searchOpen.
+                        searchMode = searching && searchOpen,
+                        searchBarContent = if (searching && searchOpen) {
+                            { fieldModifier ->
+                                BarSearchField(
+                                    query = search.query,
+                                    onQuery = viewModel::onSearchQuery,
+                                    modifier = fieldModifier,
+                                    ink = barInk,
+                                )
+                            }
+                        } else {
+                            null
+                        },
                         tabsFillWidth = true,
                         inlineAccessory = accessory,
                         expandedAccessory = accessory,

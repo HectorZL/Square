@@ -1,9 +1,15 @@
 package dev.lelonio.square.data
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Tracks the listener has liked ("Tus me gusta").
@@ -16,6 +22,9 @@ class LikedStore(context: Context) {
 
     private val prefs = context.applicationContext
         .getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val saveLock = Mutex()
 
     private val _liked = MutableStateFlow(load())
     val likedTracks: StateFlow<Set<String>> = _liked.asStateFlow()
@@ -55,7 +64,12 @@ class LikedStore(context: Context) {
         prefs.getStringSet(KEY_LIKED, null)?.toSet() ?: emptySet()
 
     private fun save(tracks: Set<String>) {
-        prefs.edit().putStringSet(KEY_LIKED, tracks).apply()
+        val snapshot = tracks.toSet()
+        scope.launch {
+            saveLock.withLock {
+                prefs.edit().putStringSet(KEY_LIKED, snapshot).apply()
+            }
+        }
     }
 
     private companion object {

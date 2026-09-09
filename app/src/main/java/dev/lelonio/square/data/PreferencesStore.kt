@@ -94,6 +94,19 @@ class PreferencesStore(context: Context) {
         prefs.edit().putBoolean(KEY_AUTOPLAY_INFINITE, value).apply()
     }
 
+    private val _trimSilence = MutableStateFlow(prefs.getBoolean(KEY_TRIM_SILENCE, true))
+
+    /** Whether trailing silence triggers early crossfade. */
+    val trimSilence: StateFlow<Boolean> = _trimSilence.asStateFlow()
+
+    fun setTrimSilence(value: Boolean) {
+        _trimSilence.value = value
+        prefs.edit().putBoolean(KEY_TRIM_SILENCE, value).apply()
+        runCatching {
+            dev.lelonio.square.nativecore.NativeBridge.setTrimSilence(value)
+        }
+    }
+
     /**
      * Whether the player was open when the app was last left.
      *
@@ -192,6 +205,7 @@ class PreferencesStore(context: Context) {
         const val KEY_ONBOARDED = "onboarded"
         const val KEY_CANVAS = "canvas_enabled"
         const val KEY_AUTOPLAY_INFINITE = "autoplay_infinite"
+        const val KEY_TRIM_SILENCE = "trim_silence"
         const val KEY_PLAYER_OPEN = "player_open"
         const val KEY_BACKEND = "backend"
         const val KEY_PROFILE_NAME = "profile_name"

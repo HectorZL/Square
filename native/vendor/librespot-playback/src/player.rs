@@ -212,6 +212,8 @@ enum PlayerCommand {
     SetAutoNormaliseAsAlbum(bool),
     /// LOCAL PATCH: the quality to ask for from the next load onwards.
     SetBitrate(Bitrate),
+    /// LOCAL PATCH: whether trailing silence triggers early crossfade.
+    SetTrimSilence(bool),
     EmitSessionDisconnectedEvent {
         connection_id: String,
         user_name: String,
@@ -717,6 +719,11 @@ impl Player {
     /// playing keeps the file it started with; the next track gets this.
     pub fn set_bitrate(&self, bitrate: Bitrate) {
         self.command(PlayerCommand::SetBitrate(bitrate));
+    }
+
+    /// LOCAL PATCH: whether trailing silence triggers early crossfade.
+    pub fn set_trim_silence(&self, enabled: bool) {
+        self.command(PlayerCommand::SetTrimSilence(enabled));
     }
 
     pub fn emit_filter_explicit_content_changed_event(&self, filter: bool) {
@@ -2124,8 +2131,9 @@ impl Future for PlayerInternal {
                 let duration = duration_ms as i64;
                 if crossfade_ms > 0 && duration > crossfade_ms {
                     let silence_threshold_samples = (SAMPLE_RATE as usize * NUM_CHANNELS as usize * 350) / 1000;
-                    let trailing_silence = self.consecutive_silent_samples >= silence_threshold_samples
-                        && position >= duration - crossfade_ms - 5000;
+                    let trailing_silence = self.config.trim_silence
+                        && self.consecutive_silent_samples >= silence_threshold_samples
+                        && position >= duration - crossfade_ms - 2000;
 
                     if position < duration - crossfade_ms && !trailing_silence {
                         // LOCAL PATCH: the track has been heard playing outside
@@ -2634,7 +2642,7 @@ impl PlayerInternal {
                 } else if let AudioPacket::Samples(ref data) = packet {
                     // LOCAL PATCH: track trailing silence near the end of a track for silence trimming
                     let crossfade_ms = self.config.crossfade_duration_ms as i64;
-                    if crossfade_ms > 0 && self.fade_armed.is_some() && self.early_end.is_none() {
+                    if self.config.trim_silence && crossfade_ms > 0 && self.fade_armed.is_some() && self.early_end.is_none() {
                         const SILENCE_THRESHOLD: f64 = 0.00316; // -50 dBFS
                         if data.iter().all(|s| s.abs() < SILENCE_THRESHOLD) {
                             self.consecutive_silent_samples += data.len();
@@ -3245,6 +3253,12 @@ impl PlayerInternal {
                 }
             }
 
+            // LOCAL PATCH: see Player::set_trim_silence.
+            PlayerCommand::SetTrimSilence(enabled) => {
+                info!("trim_silence is now {enabled}");
+                self.config.trim_silence = enabled;
+            }
+
             PlayerCommand::EmitFilterExplicitContentChangedEvent(filter) => {
                 self.send_event(PlayerEvent::FilterExplicitContentChanged { filter });
 
@@ -3453,6 +3467,9 @@ impl fmt::Debug for PlayerCommand {
                 .finish(),
             PlayerCommand::SetBitrate(bitrate) => {
                 f.debug_tuple("SetBitrate").field(bitrate).finish()
+            }
+            PlayerCommand::SetTrimSilence(enabled) => {
+                f.debug_tuple("SetTrimSilence").field(enabled).finish()
             }
             PlayerCommand::SetAutoNormaliseAsAlbum(setting) => f
                 .debug_tuple("SetAutoNormaliseAsAlbum")
