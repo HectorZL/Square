@@ -55,3 +55,36 @@
 # the fully qualified class name.
 -keepclasseswithmembernames class dev.lelonio.square.playback.Stretcher { native <methods>; }
 -keep class dev.lelonio.square.playback.Stretcher { *; }
+
+# ------------------------------------------------------------------------------
+# R8 / Proguard Performance and Size Optimizations
+# ------------------------------------------------------------------------------
+
+# 1. Aggressive method inlining and access modification
+# Allows R8 to widen visibility (e.g. private/internal to public) to inline across package boundaries
+-allowaccessmodification
+-mergeinterfacesaggressively
+
+# 2. Flatten package hierarchy to minimize DEX string pool size
+-repackageclasses ''
+
+# 3. Strip debug and verbose logging from release builds (saves bytecode & CPU cycles)
+-assumenosideeffects class android.util.Log {
+    public static boolean isLoggable(java.lang.String, int);
+    public static int v(...);
+    public static int d(...);
+}
+
+# 4. Strip redundant Kotlin runtime parameter null checks in release
+-assumenosideeffects class kotlin.jvm.internal.Intrinsics {
+    public static void checkNotNullParameter(java.lang.Object, java.lang.String);
+    public static void checkParameterIsNotNull(java.lang.Object, java.lang.String);
+}
+
+# 5. Clean line numbers for stack traces while obfuscating source filenames
+-renamesourcefileattribute SourceFile
+-keepattributes SourceFile,LineNumberTable
+
+# 6. Jetpack Compose & Kotlin coroutines optimization
+-dontwarn androidx.compose.**
+-dontwarn kotlinx.coroutines.**
