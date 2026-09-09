@@ -272,6 +272,11 @@ fun SettingsScreen(
             CrossfadeSection()
         }
 
+        // Autoplay: automatically append similar tracks when queue reaches the end.
+        if (open == SettingsPage.Playback) item("autoplay") {
+            AutoplaySection(backdrop)
+        }
+
         // Spotify's own, served by its access point: on another source there is
         // no clip to ask for and nothing this switch could turn off.
         if (open == SettingsPage.Playback && showSpotify) item("canvas") {
@@ -636,6 +641,24 @@ private fun CanvasSection(backdrop: Backdrop) {
             checked = enabled,
             backdrop = backdrop,
             onChange = store::setCanvasEnabled,
+        )
+    }
+}
+
+@Composable
+private fun AutoplaySection(backdrop: Backdrop) {
+    val context = LocalContext.current
+    val store = remember(context) {
+        (context.applicationContext as dev.lelonio.square.SquareApplication).preferences
+    }
+    val enabled by store.autoplayInfinite.collectAsStateWithLifecycle()
+
+    Section(stringResource(R.string.autoplay)) {
+        DownloadSwitch(
+            label = stringResource(R.string.autoplay_infinite_title),
+            checked = enabled,
+            backdrop = backdrop,
+            onChange = store::setAutoplayInfinite,
         )
     }
 }

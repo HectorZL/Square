@@ -141,6 +141,7 @@ import com.adamglin.phosphoricons.regular.SpotifyLogo
 import com.adamglin.phosphoricons.regular.YoutubeLogo
 import com.adamglin.phosphoricons.regular.Export
 import com.adamglin.phosphoricons.regular.Trash
+import com.adamglin.phosphoricons.regular.User
 import dev.lelonio.square.data.RemoteConnect
 import dev.lelonio.square.ui.player.asPlaybackState
 import dev.lelonio.square.ui.player.rememberRemotePositionMs
@@ -372,6 +373,8 @@ fun SquareApp(
     onPlay: (List<CatalogTrack>, Int, String?, Boolean, String, Long) -> Unit,
     /** Appends one track to the end of the queue; see the swipe gesture on rows. */
     onEnqueue: (CatalogTrack) -> Unit,
+    /** Appends multiple tracks to the end of the queue; used by Autoplay. */
+    onEnqueueAll: (List<CatalogTrack>) -> Unit = {},
     /**
      * Incremented when something outside the app asks for the player — the
      * notification, for now. A counter, so a second request while the player is
@@ -648,6 +651,38 @@ fun SquareApp(
     LaunchedEffect(playback.mediaId) {
         awaitAudible(localState)
         viewModel.lookUpVideo(playback.mediaId)
+    }
+
+    // Infinite autoplay: dynamically fetch and append similar tracks from Spotify
+    // radio when reaching the end of the queue.
+    val autoplayInfinite by viewModel.autoplayInfinite.collectAsStateWithLifecycle()
+    var lastAutoplayTrackUri by remember { mutableStateOf<String?>(null) }
+    var autoplayInFlight by remember { mutableStateOf(false) }
+
+    LaunchedEffect(playback.mediaId, playback.hasNext, autoplayInfinite, queue.size) {
+        val currentUri = playback.mediaId
+        if (!autoplayInfinite || currentUri == null || !currentUri.startsWith("spotify:track:")) return@LaunchedEffect
+        // Only trigger if on the last item of the queue and repeat is off
+        if (playback.hasNext || playback.repeatMode != androidx.media3.common.Player.REPEAT_MODE_OFF) return@LaunchedEffect
+        if (currentUri == lastAutoplayTrackUri || autoplayInFlight) return@LaunchedEffect
+
+        lastAutoplayTrackUri = currentUri
+        autoplayInFlight = true
+        try {
+            val stationTracks = viewModel.radioFor(currentUri)
+            val currentUris = (0 until (player?.mediaItemCount ?: 0))
+                .mapNotNull { player?.getMediaItemAt(it)?.mediaId }
+                .toSet()
+            val newTracks = stationTracks.filter { it.uri !in currentUris }
+            if (newTracks.isNotEmpty()) {
+                android.util.Log.i("SquareAutoplay", "Appended ${newTracks.size} autoplay tracks for $currentUri")
+                onEnqueueAll(newTracks)
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w("SquareAutoplay", "Failed to fetch autoplay tracks", t)
+        } finally {
+            autoplayInFlight = false
+        }
     }
     val devices by viewModel.devices.collectAsStateWithLifecycle()
     val addToPlaylist by viewModel.addToPlaylist.collectAsStateWithLifecycle()
@@ -1416,6 +1451,9 @@ fun SquareApp(
                         },
                     ) {
                         composable(Routes.HOME) {
+                            LaunchedEffect(Unit) {
+                                viewModel.loadBrowse()
+                            }
                             HomeScreen(
                                 state = state,
                                 contentPadding = listPadding,
@@ -1442,6 +1480,7 @@ fun SquareApp(
                                 onRetryOnline = viewModel::retryOnline,
                                 youtubeHome = youtubeHome,
                                 shelves = homeShelves,
+                                mixShelves = radioShelves,
                                 onPlayTrending = { tracks, index ->
                                     onPlay(tracks, index, null, false, trendingLabel, 0L)
                                 },
@@ -3099,6 +3138,20 @@ fun SquareApp(
                             TrackSheetAction(stringResource(R.string.add_to_playlist), PhosphorIcons.Regular.Plus) {
                                 trackMenu = null
                                 viewModel.openAddToPlaylist(menu.track.uri, menu.track.name)
+                            }
+                        }
+                        TrackSheetAction(stringResource(R.string.go_to_artist), PhosphorIcons.Regular.User) {
+                            val track = menu.track
+                            trackMenu = null
+                            scope.launch {
+                                if (expand.value > 0f) {
+                                    expand.animateTo(0f, expandSpec)
+                                }
+                                val artist = viewModel.artistOf(track)
+                                if (artist != null) {
+                                    viewModel.openContext(artist.uri, artist.title, artist.artworkUrl)
+                                    navController.navigate(Routes.PLAYLIST)
+                                }
                             }
                         }
                         // Keeping one song, as opposed to keeping the list it

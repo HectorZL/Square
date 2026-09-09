@@ -162,6 +162,7 @@ fun HomeScreen(
      * cannot be reconstructed from the account's playlists.
      */
     shelves: List<dev.lelonio.square.data.HomeShelf> = emptyList(),
+    mixShelves: List<dev.lelonio.square.data.HomeShelf> = emptyList(),
 ) {
     if (youtubeMode) {
         YouTubeHome(
@@ -372,7 +373,8 @@ fun HomeScreen(
                 // placeholder the page arrived in two halves and shifted under
                 // whatever was being read.
                 if (filter == Feed.ALL) {
-                    shelves.forEach { shelf ->
+                    val allShelves = if (mixShelves.isEmpty()) shelves else (shelves + mixShelves).distinctBy { it.title }
+                    allShelves.forEach { shelf ->
                         item(contentType = "shelf") { Heading(shelf.title) }
                         item(contentType = "shelf") {
                             Carousel(shelf.items, key = { it.uri }) { entry ->

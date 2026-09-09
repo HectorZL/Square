@@ -120,6 +120,7 @@
     <!-- Track menu -->
     <string name="add_to_queue">Add to queue</string>
     <string name="add_to_playlist">Add to a playlist</string>
+    <string name="go_to_artist">Go to artist</string>
     <string name="copy_link">Copy link</string>
     <string name="remove_from_playlist">Remove from playlist</string>
     <string name="queued">Queued</string>
@@ -422,4 +423,8 @@
     <string name="show_all">Show all</string>
     <string name="show_less">Show less</string>
     <string name="search_library">Search your library</string>
+    <string name="autoplay">Autoplay</string>
+    <string name="autoplay_infinite_title">Infinite Autoplay</string>
+    <string name="autoplay_infinite_summary">Keep playing similar tracks when queue ends</string>
+    <string name="mood_mixes">Mood Mixes</string>
 </resources>

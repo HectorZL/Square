@@ -105,6 +105,7 @@
 
     <string name="add_to_queue">Añadir a la cola</string>
     <string name="add_to_playlist">Añadir a una playlist</string>
+    <string name="go_to_artist">Ir al artista</string>
     <string name="copy_link">Copiar enlace</string>
     <string name="remove_from_playlist">Quitar de la playlist</string>
     <string name="queued">En cola</string>
@@ -401,4 +402,8 @@
     <string name="show_all">Mostrar todo</string>
     <string name="show_less">Mostrar menos</string>
     <string name="search_library">Buscar en tu biblioteca</string>
+    <string name="autoplay">Reproducción continua</string>
+    <string name="autoplay_infinite_title">Autoplay infinito</string>
+    <string name="autoplay_infinite_summary">Sigue reproduciendo música similar al terminar la cola</string>
+    <string name="mood_mixes">Mixes por estado de ánimo</string>
 </resources>

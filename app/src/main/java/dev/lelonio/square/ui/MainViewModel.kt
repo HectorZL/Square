@@ -1991,6 +1991,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The account's own Spotify id, once the profile has been read. */
     private var meId: String? = null
+    /** The account's country, for endpoints that require market code. */
+    private var userCountry: String? = null
 
     private fun loadProfile() = viewModelScope.launch {
         if (!container.webApi.isReady) return@launch
@@ -2006,6 +2008,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // list mine. The id, not the display name — two accounts can
                 // be called the same thing and only one of them owns it.
                 meId = profile.id
+                userCountry = profile.country
                 // And kept on disk, for the next time there is no network to
                 // ask with; see [offlineLibrary].
                 container.preferences.setProfile(
@@ -2059,6 +2062,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val onboarded: StateFlow<Boolean> get() = container.preferences.onboarded
 
     fun setOnboarded(value: Boolean) = container.preferences.setOnboarded(value)
+
+    /** Infinite autoplay: whether to fetch similar tracks when queue reaches the end. */
+    val autoplayInfinite: StateFlow<Boolean> get() = container.preferences.autoplayInfinite
+
+    fun setAutoplayInfinite(value: Boolean) = container.preferences.setAutoplayInfinite(value)
 
     /**
      * Loads a playlist's tracks.
@@ -3653,6 +3661,54 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    /**
+     * Resolves the artist for a track.
+     *
+     * Prefers the track's own artistUri or first credited artist; if missing on
+     * a Spotify track, looks it up via Web API.
+     */
+    suspend fun artistOf(track: CatalogTrack): SearchItem? {
+        val directUri = track.artistUri ?: track.artists.firstOrNull()?.uri
+        val name = track.artists.firstOrNull()?.name ?: track.artist
+        if (directUri != null) {
+            return SearchItem(
+                uri = directUri,
+                title = name,
+                subtitle = "",
+                artworkUrl = null,
+            )
+        }
+        if (track.uri.startsWith("spotify:track:") && container.webApi.isReady) {
+            val id = track.uri.substringAfterLast(':')
+            val dto = runCatching { container.api.track(id) }
+                .onFailure { android.util.Log.w(TAG, "no artist for ${track.uri}: ${describe(it)}") }
+                .getOrNull()
+            val firstArtist = dto?.artists?.firstOrNull()
+            if (firstArtist?.uri != null) {
+                return SearchItem(
+                    uri = firstArtist.uri,
+                    title = firstArtist.name ?: name,
+                    subtitle = "",
+                    artworkUrl = null,
+                )
+            }
+        }
+        if (name.isNotBlank() && container.webApi.isReady) {
+            val hit = runCatching {
+                container.api.search(query = name, type = "artist", limit = 1).artists?.items?.firstOrNull()
+            }.getOrNull()
+            if (hit?.uri != null) {
+                return SearchItem(
+                    uri = hit.uri,
+                    title = hit.name,
+                    subtitle = "",
+                    artworkUrl = hit.images.firstOrNull()?.url,
+                )
+            }
+        }
+        return null
+    }
+
     /** Called when the track changes; cached and cheap on a repeat. */
     fun loadNowPlayingArt(uri: String?, title: String, album: String, artist: String) {
         nowPlayingArtJob?.cancel()
@@ -3876,16 +3932,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             error(string(R.string.artist_needs_app))
         }
         val id = uri.substringAfterLast(':')
-        val tracks = container.api.artistTopTracks(id).tracks.map { it.toCatalogTrack() }
+        val market = userCountry?.takeIf { it.length == 2 }
+            ?: java.util.Locale.getDefault().country.takeIf { it.length == 2 }
+            ?: "US"
+        val tracks = runCatching {
+            container.api.artistTopTracks(id, market = market).tracks.map { it.toCatalogTrack() }
+        }.onFailure {
+            android.util.Log.w(TAG, "top tracks failed for artist $id: ${describe(it)}")
+        }.getOrElse { emptyList() }
 
         // One request for every kind of record rather than three. Spotify says
         // which shelf each one belongs on, and asking per shelf would spend the
         // account's quota three times for the same answer.
-        val releases = container.api.artistAlbums(
-            id,
-            groups = "album,single,compilation,appears_on",
-            limit = 50,
-        ).items
+        val releases = runCatching {
+            container.api.artistAlbums(
+                id,
+                groups = "album,single,compilation,appears_on",
+                limit = 50,
+            ).items
+        }.onFailure {
+            android.util.Log.w(TAG, "albums failed for artist $id: ${describe(it)}")
+        }.getOrElse { emptyList() }
 
         fun shelf(vararg groups: String): List<SearchItem> = releases
             .filter { it.albumGroup in groups }

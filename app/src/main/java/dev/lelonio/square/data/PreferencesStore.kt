@@ -84,6 +84,16 @@ class PreferencesStore(context: Context) {
         prefs.edit().putBoolean(KEY_CANVAS, value).apply()
     }
 
+    private val _autoplayInfinite = MutableStateFlow(prefs.getBoolean(KEY_AUTOPLAY_INFINITE, true))
+
+    /** Whether playback automatically appends similar tracks when reaching queue end. */
+    val autoplayInfinite: StateFlow<Boolean> = _autoplayInfinite.asStateFlow()
+
+    fun setAutoplayInfinite(value: Boolean) {
+        _autoplayInfinite.value = value
+        prefs.edit().putBoolean(KEY_AUTOPLAY_INFINITE, value).apply()
+    }
+
     /**
      * Whether the player was open when the app was last left.
      *
@@ -169,6 +179,7 @@ class PreferencesStore(context: Context) {
         const val KEY_DEVICE_ID = "device_id"
         const val KEY_ONBOARDED = "onboarded"
         const val KEY_CANVAS = "canvas_enabled"
+        const val KEY_AUTOPLAY_INFINITE = "autoplay_infinite"
         const val KEY_PLAYER_OPEN = "player_open"
         const val KEY_BACKEND = "backend"
         const val KEY_PROFILE_NAME = "profile_name"

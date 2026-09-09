@@ -66,7 +66,7 @@ interface SpotifyApi {
         @Path("id") playlistId: String,
         @Query("limit") limit: Int = 100,
         @Query("offset") offset: Int = 0,
-        @Query("market") market: String = "from_token",
+        @Query("market") market: String? = null,
     ): PageDto<PlaylistTrackDto>
 
     /**
@@ -144,7 +144,7 @@ interface SpotifyApi {
     @GET("v1/artists/{id}/top-tracks")
     suspend fun artistTopTracks(
         @Path("id") artistId: String,
-        @Query("market") market: String = "from_token",
+        @Query("market") market: String = "US",
     ): TopTracksDto
 
     @GET("v1/artists/{id}/albums")
@@ -379,6 +379,7 @@ data class UserDto(
     @SerialName("display_name") val displayName: String? = null,
     /** `premium` or `free`; the engine only works for the former. */
     val product: String? = null,
+    val country: String? = null,
     val images: List<ImageDto> = emptyList(),
 )
 
