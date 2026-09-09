@@ -2348,22 +2348,11 @@ fun SquareApp(
                         // the pill would be the same control twice. It stays for
                         // the folded bar, where there is no pill to hold it.
                         standaloneInExpanded = false,
-                        // Tapping the search tab grows it into the field, and
-                        // the tabs fold away behind it. Tapping it again puts
-                        // the field away and leaves the results; see searchOpen.
-                        searchMode = searching && searchOpen,
-                        searchBarContent = if (searching && searchOpen) {
-                            { fieldModifier ->
-                                BarSearchField(
-                                    query = search.query,
-                                    onQuery = viewModel::onSearchQuery,
-                                    modifier = fieldModifier,
-                                    ink = barInk,
-                                )
-                            }
-                        } else {
-                            null
-                        },
+                        // Search field now lives in SearchScreen, so the tab bar
+                        // never needs to morph into a field — the categories stay
+                        // visible at all times.
+                        searchMode = false,
+                        searchBarContent = null,
                         tabsFillWidth = true,
                         inlineAccessory = accessory,
                         expandedAccessory = accessory,

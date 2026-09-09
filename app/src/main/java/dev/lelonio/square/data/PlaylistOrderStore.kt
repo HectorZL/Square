@@ -70,6 +70,24 @@ fun List<CatalogPlaylist>.withLocalFilesFirst(): List<CatalogPlaylist> {
     return listOf(local) + filterNot { it.uri == local.uri }
 }
 
+/**
+ * Moves the "Liked Songs" playlist (Spotify collection, URI ends with ":collection")
+ * to the second position, right after the local-files shelf.
+ *
+ * The user asked for: 1st downloaded music, 2nd liked music. This companion to
+ * withLocalFilesFirst() implements the second half of that order.
+ */
+fun List<CatalogPlaylist>.withLikedSecond(): List<CatalogPlaylist> {
+    val liked = firstOrNull { it.uri.endsWith(":collection") } ?: return this
+    // Keep position 0 (local files) in place if it exists, insert liked at position 1.
+    val without = filterNot { it.uri == liked.uri }
+    return if (without.isNotEmpty() && LocalLibrary.isLocalContext(without.firstOrNull()?.uri)) {
+        listOf(without.first(), liked) + without.drop(1)
+    } else {
+        listOf(liked) + without
+    }
+}
+
 fun List<CatalogPlaylist>.sortedByRecentlyOpened(order: List<String>): List<CatalogPlaylist> {
     if (order.isEmpty()) return this
     val rank = order.withIndex().associate { (index, uri) -> uri to index }

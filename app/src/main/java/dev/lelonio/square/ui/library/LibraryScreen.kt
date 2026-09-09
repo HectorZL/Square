@@ -47,6 +47,7 @@ import dev.lelonio.square.R
 import dev.lelonio.square.data.CatalogPlaylist
 import dev.lelonio.square.data.sortedByRecentlyOpened
 import dev.lelonio.square.data.withLocalFilesFirst
+import dev.lelonio.square.data.withLikedSecond
 import dev.lelonio.square.data.withPinnedFirst
 import dev.lelonio.square.ui.MainViewModel
 import dev.lelonio.square.ui.components.Artwork
@@ -249,6 +250,9 @@ fun LibraryScreen(
                     // of the library, and one nobody has opened yet would
                     // otherwise sit sixtieth among lists they have.
                     .withLocalFilesFirst()
+                    // Liked Songs sits second, right after downloaded music.
+                    // This is the order the listener asked for.
+                    .withLikedSecond()
             }
 
             Box(Modifier.fillMaxSize()) {

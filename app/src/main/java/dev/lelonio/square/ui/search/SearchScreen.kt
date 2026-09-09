@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -60,6 +61,7 @@ import com.adamglin.phosphoricons.Fill
 import com.adamglin.phosphoricons.Regular
 import com.adamglin.phosphoricons.bold.MagnifyingGlass
 import com.adamglin.phosphoricons.bold.X
+import com.adamglin.phosphoricons.fill.XCircle
 import com.adamglin.phosphoricons.regular.DotsThree
 
 /** Which kind of result the page is showing. */
@@ -146,9 +148,15 @@ fun SearchScreen(
         state = listState,
         contentPadding = contentPadding,
     ) {
-        // No field here: it is in the bar, where the search button grows into
-        // it. A page that answers a query by drawing a second box asks which of
-        // the two is listening.
+        // The search field lives here on the page so the bottom tab bar stays
+        // visible at all times — the bar no longer needs to morph into a field.
+        item(contentType = "search-field") {
+            SearchField(
+                query = state.query,
+                onQuery = onQuery,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+            )
+        }
 
         if (!state.results.isEmpty && !state.loading) {
             item(contentType = "chips") {
@@ -526,6 +534,71 @@ private val SelectedFilm = androidx.compose.ui.graphics.Color.White.copy(alpha =
  * strength a whole page of them reads as a page of buttons.
  */
 private val BadgeFilm = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f)
+
+/**
+ * The in-page search field.
+ *
+ * Lives here rather than in the bottom bar so the tab categories remain visible
+ * at all times while searching — the bar no longer needs to expand into a field.
+ */
+@Composable
+private fun SearchField(
+    query: String,
+    onQuery: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.White.copy(alpha = 0.12f))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            PhosphorIcons.Bold.MagnifyingGlass,
+            contentDescription = null,
+            tint = InkDim,
+            modifier = Modifier.size(20.dp),
+        )
+        BasicTextField(
+            value = query,
+            onValueChange = onQuery,
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = Ink),
+            cursorBrush = SolidColor(Ink),
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 12.dp)
+                .focusRequester(focus),
+            decorationBox = { field ->
+                if (query.isEmpty()) {
+                    Text(
+                        stringResource(R.string.search_placeholder),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = InkDim,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                field()
+            },
+        )
+        if (query.isNotEmpty()) {
+            Icon(
+                PhosphorIcons.Fill.XCircle,
+                contentDescription = stringResource(R.string.clear),
+                tint = InkDim,
+                modifier = Modifier
+                    .size(22.dp)
+                    .pressable(onClick = { onQuery("") }, pressedScale = 0.9f),
+            )
+        }
+    }
+}
 
 /**
  * How many of each kind the combined page shows before the chips take over.
