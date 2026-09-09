@@ -1369,10 +1369,13 @@ class LibrespotPlayer(
 
         when (type) {
             "loading" -> {
-                playbackState = Player.STATE_BUFFERING
+                val current = queue.items.getOrNull(queue.currentIndex)?.uri
+                if (uri.isEmpty() || current == null || uri == current) {
+                    playbackState = Player.STATE_BUFFERING
+                    loadInFlight = true
+                    handler.removeCallbacks(stallWatch)
+                }
                 if (uri.isNotEmpty()) bandwidth.loading(uri)
-                loadInFlight = true
-                handler.removeCallbacks(stallWatch)
             }
             "playing" -> {
                 // A new track to watch, and one this side has not moved on
@@ -1405,6 +1408,23 @@ class LibrespotPlayer(
                 // Taking those would run the bar forward on a song that is no
                 // longer the one on screen.
                 if (skipPending || skipInFlight) return
+
+                val currentUri = queue.items.getOrNull(queue.currentIndex)?.uri
+                if (uri.isNotEmpty() && currentUri != null && uri != currentUri) {
+                    // Stale position event belonging to a different track (e.g. fading out)
+                    return
+                }
+
+                // Prevent position from jumping backwards during continuous forward playback:
+                // During track transitions, initial AudioTrack buffer latency or crossfade pacing
+                // can make early stream position reports lag slightly behind the extrapolated
+                // playback clock (e.g. 3s -> 1s). Do not snap the playback position backwards if
+                // the difference is small (< 4s), maintaining smooth forward progress.
+                val currentPos = currentPosition
+                if (playbackState == Player.STATE_READY && playWhenReady && eventPositionMs < currentPos && (currentPos - eventPositionMs) < 4_000L) {
+                    return
+                }
+
                 positionMs = eventPositionMs
 
                 // Offline, the run-up to the next track is this side's job.

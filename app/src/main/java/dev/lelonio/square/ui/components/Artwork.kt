@@ -138,6 +138,10 @@ fun Artwork(
                 label = "artwork",
             )
 
+            if (fallback && !arrived) {
+                GeneratedCover(title, corner)
+            }
+
             AsyncImage(
                 model = request,
                 contentDescription = null,
@@ -243,10 +247,15 @@ private fun isOnThisPhone(url: String): Boolean =
  * encode the resolution; the last twenty-four identify the picture. Swapping
  * the prefix is enough to request any print the CDN publishes.
  *
- * Known prefixes (from the Spotify web player):
- *  - `ab67616d0000b273` → 640 × 640 px
- *  - `ab67616d00001e02` → 300 × 300 px
- *  - `ab67616d00004851` → 64 × 64 px
+ * Known prefixes (from the Spotify web player / CDN):
+ *  - Albums / tracks / covers (`ab67616d`):
+ *      - `ab67616d0000b273` → 640 × 640 px
+ *      - `ab67616d00001e02` → 300 × 300 px
+ *      - `ab67616d00004851` → 64 × 64 px
+ *  - Artist avatars (`ab676161`):
+ *      - `ab6761610000e5eb` → 640 × 640 px
+ *      - `ab67616100005174` → 320 × 320 px
+ *      - `ab6761610000f178` → 160 × 160 px
  *
  * Only fires for URLs whose last path component looks like a Spotify image ID
  * (40 hex chars). Everything else is returned unchanged.
@@ -256,9 +265,17 @@ fun spotifyResizedUrl(url: String, targetPx: Int): String {
     val id = url.substringAfterLast('/')
     if (id.length != SPOTIFY_ID_LEN || !id.all { it.isDigit() || it in 'a'..'f' }) return url
     val smallPrefix = when {
-        targetPx <= 64  -> "ab67616d00004851"
-        targetPx <= 300 -> "ab67616d00001e02"
-        else            -> return url  // 640 px — keep the original URL
+        id.startsWith("ab67616d") -> when {
+            targetPx <= 64  -> "ab67616d00004851"
+            targetPx <= 300 -> "ab67616d00001e02"
+            else            -> return url  // 640 px — keep the original URL
+        }
+        id.startsWith("ab676161") -> when {
+            targetPx <= 160 -> "ab6761610000f178"
+            targetPx <= 320 -> "ab67616100005174"
+            else            -> return url  // 640 px — keep the original URL
+        }
+        else -> return url // Unrecognized Spotify image prefix: leave unmodified
     }
     val tail = id.drop(SPOTIFY_SIZE_PREFIX_LEN)
     return url.dropLast(SPOTIFY_ID_LEN) + smallPrefix + tail
