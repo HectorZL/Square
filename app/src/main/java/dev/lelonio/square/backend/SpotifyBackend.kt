@@ -157,9 +157,12 @@ class SpotifyBackend(private val container: SquareApplication) : MusicBackend {
      */
     override suspend fun tracksOf(uri: String): List<CatalogTrack> = when {
         uri.startsWith("spotify:artist:") -> {
-            check(container.webApi.isReady) { "un artista richiede la tua applicazione Spotify" }
-            container.api.artistTopTracks(uri.substringAfterLast(':'), market = container.userCountry).tracks
-                .map { it.toCatalogTrack() }
+            runCatching {
+                container.api.artistTopTracks(uri.substringAfterLast(':'), market = container.userCountry).tracks
+                    .map { it.toCatalogTrack() }
+            }.getOrElse {
+                Catalog.tracks(Catalog.contextTrackUris(uri).take(10))
+            }
         }
 
         // Spotify's own gateway first, for both of the lists it answers for:

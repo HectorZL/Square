@@ -2270,18 +2270,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val kind = kindOf(uri)
         val id = uri.substringAfterLast(':')
 
-        if (container.webApi.isReady) {
-            runCatching {
-                when (kind) {
-                    DetailKind.ARTIST -> container.api.artist(id).name
-                    DetailKind.ALBUM -> container.api.album(id).name
-                    DetailKind.PLAYLIST -> container.api.playlist(id).name
-                }
+        runCatching {
+            when (kind) {
+                DetailKind.ARTIST -> container.api.artist(id).name
+                DetailKind.ALBUM -> container.api.album(id).name
+                DetailKind.PLAYLIST -> container.api.playlist(id).name
             }
-                .onFailure { android.util.Log.w(TAG, "no name for $uri: ${describe(it)}") }
-                .getOrNull()
-                ?.let { return it }
         }
+            .onFailure { android.util.Log.w(TAG, "no name for $uri: ${describe(it)}") }
+            .getOrNull()
+            ?.let { return it }
 
         // The Web API answers 404 for everything Spotify generates itself — the
         // daily mixes, the editorial lists, the one somebody is most likely to
@@ -3102,6 +3100,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val page = loadArtist(playlist.uri)
                     publishPlaylist(
                         base.copy(
+                            name = base.name.ifEmpty { page.name.orEmpty() },
+                            artworkUrl = base.artworkUrl ?: page.artworkUrl,
                             tracks = page.tracks,
                             latest = page.latest,
                             albums = page.albums,
@@ -3320,18 +3320,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             ?.let { return it }
 
         val id = uri.substringAfterLast(':')
-        if (container.webApi.isReady) {
-            val fetched = runCatching {
-                when (kind) {
-                    DetailKind.ARTIST -> container.api.artist(id).images
-                    DetailKind.ALBUM -> container.api.album(id).images
-                    DetailKind.PLAYLIST -> container.api.playlist(id).images
-                }.firstOrNull()?.url
-            }
-                .onFailure { android.util.Log.w(TAG, "no cover for $uri: ${describe(it)}") }
-                .getOrNull()
-            if (fetched != null) return fetched
+        val fetched = runCatching {
+            when (kind) {
+                DetailKind.ARTIST -> container.api.artist(id).images
+                DetailKind.ALBUM -> container.api.album(id).images
+                DetailKind.PLAYLIST -> container.api.playlist(id).images
+            }.firstOrNull()?.url
         }
+            .onFailure { android.util.Log.w(TAG, "no cover for $uri: ${describe(it)}") }
+            .getOrNull()
+        if (fetched != null) return fetched
 
         // The access point carries the art for the lists Spotify generates,
         // which is where the Web API answers 404.
@@ -3782,7 +3780,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
         }
-        if (name.isNotBlank() && container.webApi.isReady) {
+        if (name.isNotBlank()) {
             val hit = runCatching {
                 container.api.search(query = name, type = "artist", limit = 1).artists?.items?.firstOrNull()
             }.getOrNull()
@@ -4016,12 +4014,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val followers: Int,
         val genres: List<String>,
         val monthlyListeners: String?,
+        val name: String? = null,
+        val artworkUrl: String? = null,
     )
 
     private suspend fun loadArtist(uri: String): ArtistPage = coroutineScope {
-        if (!container.webApi.isReady) {
-            error(string(R.string.artist_needs_app))
-        }
         val id = uri.substringAfterLast(':')
         val market = userCountry
 
@@ -4046,23 +4043,46 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
             if (tracks.isEmpty()) {
                 runCatching {
-                    Catalog.tracks(Catalog.contextTrackUris(uri).take(20))
+                    Catalog.tracks(Catalog.contextTrackUris(uri).take(10))
                 }.onFailure {
                     android.util.Log.w(TAG, "native artist fallback failed for $id: ${describe(it)}")
                 }.getOrElse { emptyList() }
             } else {
                 tracks
-            }
+            }.take(5)
         }
 
         val releasesDeferred = async {
             runCatching {
-                container.api.artistAlbums(
-                    artistId = id,
-                    groups = "album,single,compilation,appears_on",
-                    limit = 50,
-                    market = market,
-                ).items
+                val primary = runCatching {
+                    container.api.artistAlbums(
+                        artistId = id,
+                        groups = "album,single",
+                        limit = 50,
+                        market = market,
+                    ).items
+                }.getOrElse { emptyList() }
+
+                primary.ifEmpty {
+                    if (market != "US") {
+                        runCatching {
+                            container.api.artistAlbums(
+                                artistId = id,
+                                groups = "album,single",
+                                limit = 50,
+                                market = "US",
+                            ).items
+                        }.getOrElse { emptyList() }
+                    } else emptyList()
+                }.ifEmpty {
+                    runCatching {
+                        container.api.artistAlbums(
+                            artistId = id,
+                            groups = "album,single",
+                            limit = 50,
+                        ).items
+                    }.getOrElse { emptyList() }
+                }
             }.onFailure {
                 android.util.Log.w(TAG, "albums failed for artist $id: ${describe(it)}")
             }.getOrElse { emptyList() }
@@ -4078,27 +4098,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 .getOrNull()
         }
 
-        val relatedDeferred = async {
-            runCatching {
-                container.api.artistRelatedArtists(id).artists.mapNotNull { rel ->
-                    val rUri = rel.uri ?: return@mapNotNull null
-                    SearchItem(
-                        uri = rUri,
-                        title = rel.name,
-                        subtitle = "",
-                        artworkUrl = rel.images.firstOrNull()?.url,
-                    )
-                }
-            }.onFailure {
-                android.util.Log.w(TAG, "related artists failed for $id: ${describe(it)}")
-            }.getOrElse { emptyList() }
-        }
-
         val tracks = tracksDeferred.await()
         val releases = releasesDeferred.await()
         val artist = artistDeferred.await()
         val following = followingDeferred.await()
-        val related = relatedDeferred.await()
 
         if (following != null) {
             _playlist.value = _playlist.value.let {
@@ -4128,29 +4131,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .distinctBy { it.title.lowercase() }
             .sortedByDescending { it.subtitle }
 
-        val latest = releases
-            .filter { it.albumGroup == "album" || it.albumGroup == "single" }
-            .filter { !it.releaseDate.isNullOrBlank() }
-            .maxByOrNull { it.releaseDate.orEmpty() }
-            ?.let { album ->
-                album.uri?.let { uri ->
-                    val year = album.releaseDate?.take(4).orEmpty()
-                    val type = when (album.albumGroup) {
-                        "single" -> if (album.totalTracks > 1) "EP" else "Sencillo"
-                        "album" -> "Álbum"
-                        else -> "Lanzamiento"
-                    }
-                    val dateLabel = if (year.isNotEmpty()) "$type • $year" else album.releaseDate.orEmpty()
-                    ArtistRelease(
-                        uri = uri,
-                        title = album.name,
-                        artworkUrl = album.images.firstOrNull()?.url,
-                        releaseDate = dateLabel,
-                        trackCount = album.totalTracks,
-                    )
-                }
-            }
-
         val followersCount = artist?.followers?.total ?: 0
         val monthlyListenersFormatted = if (followersCount > 0) {
             when {
@@ -4160,21 +4140,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         } else null
 
-        val playlists = if (!artist?.name.isNullOrBlank()) {
-            artistPlaylists(artist.name)
-        } else emptyList()
-
         ArtistPage(
-            playlists = playlists,
+            playlists = emptyList(),
             tracks = tracks,
-            latest = latest,
+            latest = null,
             albums = shelf("album", "compilation"),
             singles = shelf("single"),
-            appearsOn = shelf("appears_on"),
-            relatedArtists = related,
+            appearsOn = emptyList(),
+            relatedArtists = emptyList(),
             followers = followersCount,
             genres = artist?.genres.orEmpty(),
             monthlyListeners = monthlyListenersFormatted,
+            name = artist?.name,
+            artworkUrl = artist?.images?.firstOrNull()?.url,
         )
     }
 

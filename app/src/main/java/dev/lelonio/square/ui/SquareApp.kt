@@ -1735,7 +1735,7 @@ fun SquareApp(
                                         onPlay(
                                             tracks,
                                             index,
-                                            playlist.uri,
+                                            page.uri,
                                             asContext,
                                             source,
                                             0L,
@@ -1753,7 +1753,7 @@ fun SquareApp(
                                         onPlay(
                                             tracks,
                                             0,
-                                            playlist.uri,
+                                            page.uri,
                                             false,
                                             source,
                                             0L,
@@ -1770,7 +1770,7 @@ fun SquareApp(
                                             // Taking a track out goes through
                                             // the Spotify Web API, so only a
                                             // Spotify playlist can offer it.
-                                            removable = playlist.kind ==
+                                            removable = page.kind ==
                                                 MainViewModel.DetailKind.PLAYLIST &&
                                                 backend ==
                                                 dev.lelonio.square.backend.BackendId.SPOTIFY,
@@ -1787,31 +1787,31 @@ fun SquareApp(
                                             item.artworkUrl,
                                         )
                                     },
-                                    downloadState = playlist.uri
+                                    downloadState = page.uri
                                         ?.let { downloadOwners[it] }
                                         ?: dev.lelonio.square.data.OwnerState.None,
-                                    onToggleDownload = { viewModel.toggleDownload(playlist) },
+                                    onToggleDownload = { viewModel.toggleDownload(page) },
                                     // The store belongs to the librespot engine,
                                     // so only Spotify pages can be kept — and
                                     // with no network the button would only ever
                                     // queue work that cannot start.
                                     canDownload = backend ==
                                         dev.lelonio.square.backend.BackendId.SPOTIFY &&
-                                        playlist.uri?.startsWith("spotify:") == true &&
+                                        page.uri?.startsWith("spotify:") == true &&
                                         !offlineNow,
                                     onToggleFollow = viewModel::toggleFollowArtist,
                                     onToggleLatestSaved = viewModel::toggleLatestSaved,
                                     onToggleSaved = viewModel::toggleSaved,
                                     onMenu = {
-                                        val uri = playlist.uri ?: return@PlaylistScreen
+                                        val uri = page.uri ?: return@PlaylistScreen
                                         // What the menu is allowed to offer, from
                                         // the page that knows: whose list this is,
                                         // and whether it is in the library at all.
-                                        playlistMenuMine = playlist.mine != false
-                                        playlistMenuSaved = playlist.saved != false
+                                        playlistMenuMine = page.mine != false
+                                        playlistMenuSaved = page.saved != false
                                         playlistMenu = CatalogPlaylist(
                                             uri = uri,
-                                            name = playlist.name,
+                                            name = page.name,
                                             artworkUrl = playlist.artworkUrl,
                                         )
                                     },

@@ -325,29 +325,7 @@ fun PlaylistScreen(
     // An artist page is several sections and the songs are one of them, so it
     // opens on the handful the reference shows and the heading is the way to
     // the rest. Kept per artist: opening a second artist starts closed again.
-    var topSongsOpen by remember(state.uri) { mutableStateOf(false) }
-    var selectedArtistTab by remember(state.uri) { mutableIntStateOf(0) }
-    var discographyOpen by remember(state.uri) { mutableStateOf(false) }
 
-    val popularReleases = remember(state.latest, state.singles, state.albums) {
-        val list = mutableListOf<dev.lelonio.square.data.SearchItem>()
-        state.latest?.let { l ->
-            list.add(
-                dev.lelonio.square.data.SearchItem(
-                    uri = l.uri,
-                    title = l.title,
-                    subtitle = l.releaseDate,
-                    artworkUrl = l.artworkUrl,
-                ),
-            )
-        }
-        (state.singles + state.albums).forEach { item ->
-            if (list.none { it.uri == item.uri }) {
-                list.add(item)
-            }
-        }
-        list
-    }
 
     // Derived, not stored: keeping a second list in state would leave the two
     // able to disagree after a reload.
@@ -747,49 +725,6 @@ fun PlaylistScreen(
             // that opens it is still outside the list, which is what the old
             // note here was actually about.
             if (isArtist) {
-                stickyHeader(key = "artistTabs") {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(pageColor)
-                            .padding(horizontal = 20.dp, vertical = 6.dp),
-                    ) {
-                        ArtistTabs(
-                            selectedTab = selectedArtistTab,
-                            onSelectTab = { selectedArtistTab = it },
-                            ink = pageInk,
-                        )
-                    }
-                }
-            }
-
-            if (isArtist && selectedArtistTab == 1) {
-                item(contentType = "clips") {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(260.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                PhosphorIcons.Regular.Info,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(32.dp),
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                "No hay clips disponibles",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (isArtist && selectedArtistTab == 0) {
                 item(contentType = "about") {
                     AnimatedVisibility(visible = infoOpen) {
                         ArtistAbout(
@@ -808,7 +743,7 @@ fun PlaylistScreen(
                 }
             }
 
-            if ((!isArtist || selectedArtistTab == 0) && state.tracks.isNotEmpty()) {
+            if (state.tracks.isNotEmpty()) {
                 item(contentType = "sectionTitle") {
                     if (isArtist) {
                         Row(
@@ -886,7 +821,7 @@ fun PlaylistScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                } else if (popularReleases.isEmpty() && !state.loading) {
+                } else if (state.albums.isEmpty() && state.singles.isEmpty() && !state.loading) {
                     item(contentType = "status") {
                         StatusBox {
                             Text(
@@ -898,9 +833,9 @@ fun PlaylistScreen(
                     }
                 }
 
-                !isArtist || selectedArtistTab == 0 -> itemsIndexed(
-                    items = if (isArtist && !topSongsOpen && query.isBlank()) {
-                        visible.take(TOP_SONGS)
+                else -> itemsIndexed(
+                    items = if (isArtist && query.isBlank()) {
+                        visible.take(5)
                     } else {
                         visible
                     },
@@ -932,130 +867,7 @@ fun PlaylistScreen(
                 }
             }
 
-            if (isArtist && selectedArtistTab == 0 && visible.size > TOP_SONGS && query.isBlank()) {
-                item(contentType = "moreTopTracks") {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 6.dp),
-                    ) {
-                        Text(
-                            text = if (topSongsOpen) stringResource(R.string.show_less) else stringResource(R.string.show_all),
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .pressable({ topSongsOpen = !topSongsOpen }, pressedScale = 0.96f)
-                                .padding(vertical = 4.dp),
-                        )
-                    }
-                }
-            }
-
-            if (!isArtist && state.tracks.isNotEmpty() && query.isBlank()) {
-                item(contentType = "totals") {
-                    Text(
-                        stringResource(
-                            R.string.songs_and_length,
-                            state.tracks.size,
-                            formatTotal(state.tracks.sumOf { it.durationMs }),
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 20.dp),
-                    )
-                }
-            }
-
-            if (isArtist && selectedArtistTab == 0 && popularReleases.isNotEmpty() && query.isBlank()) {
-                item(contentType = "popularReleasesHeader") {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(
-                            text = "Lanzamientos populares",
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        )
-                        Text(
-                            text = if (discographyOpen) stringResource(R.string.show_less) else "Mostrar todo",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .pressable({ discographyOpen = !discographyOpen }, pressedScale = 0.96f)
-                                .padding(horizontal = 6.dp, vertical = 4.dp),
-                        )
-                    }
-                }
-
-                val shownReleases = if (discographyOpen) popularReleases else popularReleases.take(4)
-                itemsIndexed(items = shownReleases, key = { i, r -> "rel-$i-${r.uri}" }) { i, release ->
-                    PopularReleaseRow(
-                        release = release,
-                        isLatest = i == 0 && state.latest != null,
-                        onClick = { onOpenItem(release) },
-                    )
-                }
-
-                item(contentType = "discographyButton") {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(top = 16.dp, bottom = 8.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Box(
-                            Modifier
-                                .clip(RoundedCornerShape(percent = 50))
-                                .border(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(percent = 50))
-                                .pressable({ discographyOpen = !discographyOpen }, pressedScale = 0.95f)
-                                .padding(horizontal = 28.dp, vertical = 10.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = if (discographyOpen) stringResource(R.string.show_less) else "Ver discografía",
-                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (isArtist && selectedArtistTab == 0 && state.appearsOn.isNotEmpty() && query.isBlank()) {
-                item(contentType = "conArtist") {
-                    ConArtistStrip(
-                        artistName = state.name,
-                        items = state.appearsOn,
-                        onOpen = onOpenItem,
-                    )
-                }
-            }
-
-            if (isArtist && selectedArtistTab == 0 && state.artistPlaylists.isNotEmpty() && query.isBlank()) {
-                item(contentType = "artistPlaylists") {
-                    AlbumStrip(
-                        albums = state.artistPlaylists,
-                        title = "Playlists del artista",
-                        onOpen = onOpenItem,
-                    )
-                }
-            }
-
-            if (isArtist && selectedArtistTab == 0 && state.relatedArtists.isNotEmpty() && query.isBlank()) {
-                item(contentType = "relatedArtists") {
-                    RelatedArtistsStrip(
-                        artists = state.relatedArtists,
-                        onOpen = onOpenItem,
-                    )
-                }
-            }
-
-            if (!isArtist && state.albums.isNotEmpty()) {
+            if (state.albums.isNotEmpty() && query.isBlank()) {
                 item(contentType = "albums") {
                     AlbumStrip(
                         albums = state.albums,
@@ -1065,7 +877,7 @@ fun PlaylistScreen(
                 }
             }
 
-            if (!isArtist && state.singles.isNotEmpty()) {
+            if (state.singles.isNotEmpty() && query.isBlank()) {
                 item(contentType = "singles") {
                     AlbumStrip(
                         albums = state.singles,
