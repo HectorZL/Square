@@ -154,7 +154,7 @@ object ApiFactory {
              * showing an error the user can only answer by tapping retry —
              * which costs another request against the same quota.
              */
-            const val MAX_WAIT_SECONDS = 90L
+            const val MAX_WAIT_SECONDS = 3L
             const val TAG = "SquareApi"
         }
     }

@@ -2270,11 +2270,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val kind = kindOf(uri)
         val id = uri.substringAfterLast(':')
 
+        if (kind == DetailKind.ARTIST) {
+            runCatching {
+                dev.lelonio.square.data.SpotifyWebArtist.fetch(id, container.sharedHttpClient)?.name
+            }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
+        }
+
         runCatching {
             when (kind) {
-                DetailKind.ARTIST -> container.api.artist(id).name
-                DetailKind.ALBUM -> container.api.album(id).name
-                DetailKind.PLAYLIST -> container.api.playlist(id).name
+                DetailKind.ARTIST -> if (container.webApi.isReady) container.api.artist(id).name else null
+                DetailKind.ALBUM -> if (container.webApi.isReady) container.api.album(id).name else null
+                DetailKind.PLAYLIST -> if (container.webApi.isReady) container.api.playlist(id).name else null
             }
         }
             .onFailure { android.util.Log.w(TAG, "no name for $uri: ${describe(it)}") }
@@ -3098,12 +3104,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val tracks = container.activeBackend.tracksOf(playlist.uri)
                     publishPlaylist(base.copy(tracks = tracks, loading = false))
                 } else if (kind == DetailKind.ARTIST) {
-                    val page = loadArtist(playlist.uri)
+                    val page = loadArtist(playlist.uri, base.name.ifEmpty { playlist.name })
+                    if (_playlist.value.uri != playlist.uri) return@launch
                     publishPlaylist(
                         base.copy(
                             name = base.name.ifEmpty { page.name.orEmpty() },
                             artworkUrl = base.artworkUrl ?: page.artworkUrl,
-                            tracks = page.tracks,
+                            tracks = page.tracks.take(5),
                             latest = page.latest,
                             albums = page.albums,
                             singles = page.singles,
@@ -3114,6 +3121,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             monthlyListeners = page.monthlyListeners,
                             followers = page.followers,
                             genres = page.genres,
+                            notes = base.notes ?: page.biography,
                             following = _playlist.value.following,
                             loading = false,
                         ),
@@ -3321,12 +3329,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             ?.let { return it }
 
         val id = uri.substringAfterLast(':')
+        if (kind == DetailKind.ARTIST) {
+            runCatching {
+                dev.lelonio.square.data.SpotifyWebArtist.fetch(id, container.sharedHttpClient)?.artworkUrl
+            }.getOrNull()?.takeIf { !it.isNullOrEmpty() }?.let { return it }
+        }
+
         val fetched = runCatching {
             when (kind) {
-                DetailKind.ARTIST -> container.api.artist(id).images
-                DetailKind.ALBUM -> container.api.album(id).images
-                DetailKind.PLAYLIST -> container.api.playlist(id).images
-            }.firstOrNull()?.url
+                DetailKind.ARTIST -> if (container.webApi.isReady) container.api.artist(id).images.firstOrNull()?.url else null
+                DetailKind.ALBUM -> if (container.webApi.isReady) container.api.album(id).images.firstOrNull()?.url else null
+                DetailKind.PLAYLIST -> if (container.webApi.isReady) container.api.playlist(id).images.firstOrNull()?.url else null
+            }
         }
             .onFailure { android.util.Log.w(TAG, "no cover for $uri: ${describe(it)}") }
             .getOrNull()
@@ -4004,7 +4018,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * application, hence the explicit message rather than a raw 401.
      */
     /** Everything an artist page shows, gathered in one go. */
-    private data class ArtistPage(
+    /** Everything an artist page shows, gathered in one go. */
+    data class ArtistPage(
         val tracks: List<CatalogTrack>,
         val latest: ArtistRelease?,
         val albums: List<SearchItem>,
@@ -4017,143 +4032,182 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val monthlyListeners: String?,
         val name: String? = null,
         val artworkUrl: String? = null,
+        val biography: String? = null,
     )
 
-    private suspend fun loadArtist(uri: String): ArtistPage = coroutineScope {
+    private suspend fun loadArtist(uri: String, knownName: String = ""): ArtistPage = coroutineScope {
         val id = uri.substringAfterLast(':')
         val market = userCountry
 
-        val tracksDeferred = async {
-            val tracks = runCatching {
-                val primary = runCatching {
-                    container.api.artistTopTracks(id, market = market).tracks
-                        .map { it.toCatalogTrack() }
-                }.getOrElse { emptyList() }
+        // Primary: Web scraping of Spotify artist entity (fast ~250ms, no rate limit, no developer app needed)
+        val webArtist = runCatching {
+            dev.lelonio.square.data.SpotifyWebArtist.fetch(id, container.sharedHttpClient)
+        }.onFailure {
+            android.util.Log.w(TAG, "web artist lookup failed for $id: ${describe(it)}")
+        }.getOrNull()
 
-                primary.ifEmpty {
-                    if (market != "US") {
-                        runCatching {
-                            container.api.artistTopTracks(id, market = "US").tracks
-                                .map { it.toCatalogTrack() }
-                        }.getOrElse { emptyList() }
-                    } else emptyList()
-                }
-            }.onFailure {
-                android.util.Log.w(TAG, "top tracks failed for artist $id: ${describe(it)}")
-            }.getOrElse { emptyList() }
+        if (webArtist != null && (webArtist.tracks.isNotEmpty() || webArtist.albums.isNotEmpty() || webArtist.singles.isNotEmpty())) {
+            val enrichedTracks = runCatching {
+                Catalog.tracks(webArtist.tracks.map { it.uri })
+            }.getOrNull()?.takeIf { it.size == webArtist.tracks.size } ?: webArtist.tracks
 
-            if (tracks.isEmpty()) {
-                runCatching {
-                    Catalog.tracks(Catalog.contextTrackUris(uri).take(10))
-                }.onFailure {
-                    android.util.Log.w(TAG, "native artist fallback failed for $id: ${describe(it)}")
-                }.getOrElse { emptyList() }
-            } else {
-                tracks
-            }.take(5)
-        }
-
-        val releasesDeferred = async {
-            runCatching {
-                val primary = runCatching {
-                    container.api.artistAlbums(
-                        artistId = id,
-                        groups = "album,single",
-                        limit = 50,
-                        market = market,
-                    ).items
-                }.getOrElse { emptyList() }
-
-                primary.ifEmpty {
-                    if (market != "US") {
-                        runCatching {
-                            container.api.artistAlbums(
-                                artistId = id,
-                                groups = "album,single",
-                                limit = 50,
-                                market = "US",
-                            ).items
-                        }.getOrElse { emptyList() }
-                    } else emptyList()
-                }.ifEmpty {
-                    runCatching {
-                        container.api.artistAlbums(
-                            artistId = id,
-                            groups = "album,single",
-                            limit = 50,
-                        ).items
-                    }.getOrElse { emptyList() }
-                }
-            }.onFailure {
-                android.util.Log.w(TAG, "albums failed for artist $id: ${describe(it)}")
-            }.getOrElse { emptyList() }
-        }
-
-        val artistDeferred = async {
-            runCatching { container.api.artist(id) }.getOrNull()
-        }
-
-        val followingDeferred = async {
-            runCatching { container.api.isFollowing(ids = id).firstOrNull() }
-                .onFailure { android.util.Log.w(TAG, "cannot tell if followed: ${describe(it)}") }
-                .getOrNull()
-        }
-
-        val tracks = tracksDeferred.await()
-        val releases = releasesDeferred.await()
-        val artist = artistDeferred.await()
-        val following = followingDeferred.await()
-
-        if (following != null) {
+            val isFollowed = _followedArtists.value.any { it.uri == uri }
             _playlist.value = _playlist.value.let {
-                if (it.uri == uri) it.copy(following = following) else it
+                if (it.uri == uri) it.copy(following = isFollowed) else it
             }
+
+            return@coroutineScope webArtist.copy(tracks = enrichedTracks.take(5))
         }
 
-        fun shelf(vararg groups: String): List<SearchItem> = releases
-            .filter { it.albumGroup in groups }
-            .mapNotNull { album ->
-                val year = album.releaseDate?.take(4).orEmpty()
-                val type = when (album.albumGroup) {
-                    "single" -> if (album.totalTracks > 1) "EP" else "Sencillo"
-                    "album" -> "Álbum"
-                    "compilation" -> "Recopilación"
-                    else -> ""
+        // Secondary fallback: Gateway search if web scraper fails
+        val searchName = knownName.ifEmpty { webArtist?.name.orEmpty() }
+        if (searchName.isNotEmpty()) {
+            val searchRes = runCatching {
+                container.gateway.search(searchName)?.let {
+                    dev.lelonio.square.data.GatewaySearch.parse(
+                        it,
+                        dev.lelonio.square.backend.SearchLabels(
+                            artist = string(R.string.artist),
+                            album = string(R.string.album),
+                            playlist = string(R.string.playlist),
+                        ),
+                    )
                 }
-                val subtitle = if (type.isNotEmpty() && year.isNotEmpty()) "$type • $year" else year.ifEmpty { type }
-                SearchItem(
-                    uri = album.uri ?: return@mapNotNull null,
-                    title = album.name,
-                    subtitle = subtitle,
-                    artworkUrl = album.images.firstOrNull()?.url,
+            }.getOrNull()
+
+            if (searchRes != null && searchRes.tracks.isNotEmpty()) {
+                val matchedTracks = searchRes.tracks
+                    .filter { it.artists.any { a -> a.name.contains(searchName, ignoreCase = true) } }
+                    .ifEmpty { searchRes.tracks }
+                    .take(5)
+
+                val matchedAlbums = searchRes.albums
+                val isFollowed = _followedArtists.value.any { it.uri == uri }
+                _playlist.value = _playlist.value.let {
+                    if (it.uri == uri) it.copy(following = isFollowed) else it
+                }
+
+                return@coroutineScope ArtistPage(
+                    playlists = searchRes.playlists,
+                    tracks = matchedTracks,
+                    latest = null,
+                    albums = matchedAlbums,
+                    singles = emptyList(),
+                    appearsOn = emptyList(),
+                    relatedArtists = emptyList(),
+                    followers = webArtist?.followers ?: 0,
+                    genres = emptyList(),
+                    monthlyListeners = webArtist?.monthlyListeners,
+                    name = searchName,
+                    artworkUrl = webArtist?.artworkUrl,
+                    biography = webArtist?.biography,
                 )
             }
-            // The same record is often listed several times, once per market.
-            .distinctBy { it.title.lowercase() }
-            .sortedByDescending { it.subtitle }
+        }
 
-        val followersCount = artist?.followers?.total ?: 0
-        val monthlyListenersFormatted = if (followersCount > 0) {
-            when {
-                followersCount >= 1_000_000 -> String.format(java.util.Locale.US, "%.1f M oyentes mensuales", followersCount / 1_000_000.0)
-                followersCount >= 1_000 -> String.format(java.util.Locale.US, "%.1f K oyentes mensuales", followersCount / 1_000.0)
-                else -> "$followersCount oyentes mensuales"
+        // Tertiary fallback: Web API if custom developer app is configured
+        if (container.webApi.isReady) {
+            val tracksDeferred = async {
+                runCatching {
+                    withTimeoutOrNull(3000L) {
+                        container.api.artistTopTracks(id, market = market).tracks.map { it.toCatalogTrack() }
+                    }
+                }.getOrNull().orEmpty().take(5)
             }
-        } else null
+            val releasesDeferred = async {
+                runCatching {
+                    withTimeoutOrNull(3000L) {
+                        container.api.artistAlbums(artistId = id, groups = "album,single", limit = 50, market = market).items
+                    }
+                }.getOrNull().orEmpty()
+            }
+            val artistDeferred = async {
+                runCatching { withTimeoutOrNull(2000L) { container.api.artist(id) } }.getOrNull()
+            }
+            val followingDeferred = async {
+                runCatching { withTimeoutOrNull(2000L) { container.api.isFollowing(ids = id).firstOrNull() } }.getOrNull()
+            }
+
+            val tracks = tracksDeferred.await()
+            val releases = releasesDeferred.await()
+            val artist = artistDeferred.await()
+            val following = followingDeferred.await()
+
+            if (following != null) {
+                _playlist.value = _playlist.value.let {
+                    if (it.uri == uri) it.copy(following = following) else it
+                }
+            }
+
+            fun shelf(vararg groups: String): List<SearchItem> = releases
+                .filter { it.albumGroup in groups }
+                .mapNotNull { album ->
+                    val year = album.releaseDate?.take(4).orEmpty()
+                    val type = when (album.albumGroup) {
+                        "single" -> if (album.totalTracks > 1) "EP" else "Sencillo"
+                        "album" -> "Álbum"
+                        "compilation" -> "Recopilación"
+                        else -> ""
+                    }
+                    val subtitle = if (type.isNotEmpty() && year.isNotEmpty()) "$type • $year" else year.ifEmpty { type }
+                    SearchItem(
+                        uri = album.uri ?: return@mapNotNull null,
+                        title = album.name,
+                        subtitle = subtitle,
+                        artworkUrl = album.images.firstOrNull()?.url,
+                    )
+                }
+                .distinctBy { it.title.lowercase() }
+                .sortedByDescending { it.subtitle }
+
+            val followersCount = artist?.followers?.total ?: 0
+            val monthlyListenersFormatted = if (followersCount > 0) {
+                when {
+                    followersCount >= 1_000_000 -> String.format(java.util.Locale.US, "%.1f M oyentes mensuales", followersCount / 1_000_000.0)
+                    followersCount >= 1_000 -> String.format(java.util.Locale.US, "%.1f K oyentes mensuales", followersCount / 1_000.0)
+                    else -> "$followersCount oyentes mensuales"
+                }
+            } else null
+
+            return@coroutineScope ArtistPage(
+                playlists = emptyList(),
+                tracks = tracks,
+                latest = null,
+                albums = shelf("album", "compilation"),
+                singles = shelf("single"),
+                appearsOn = emptyList(),
+                relatedArtists = emptyList(),
+                followers = followersCount,
+                genres = artist?.genres.orEmpty(),
+                monthlyListeners = monthlyListenersFormatted,
+                name = artist?.name,
+                artworkUrl = artist?.images?.firstOrNull()?.url,
+            )
+        }
+
+        // Last resort: native contextTracks
+        val nativeTracks = runCatching {
+            Catalog.tracks(Catalog.contextTrackUris(uri).take(10))
+        }.getOrDefault(emptyList()).take(5)
+
+        val isFollowed = _followedArtists.value.any { it.uri == uri }
+        _playlist.value = _playlist.value.let {
+            if (it.uri == uri) it.copy(following = isFollowed) else it
+        }
 
         ArtistPage(
             playlists = emptyList(),
-            tracks = tracks,
+            tracks = nativeTracks,
             latest = null,
-            albums = shelf("album", "compilation"),
-            singles = shelf("single"),
+            albums = emptyList(),
+            singles = emptyList(),
             appearsOn = emptyList(),
             relatedArtists = emptyList(),
-            followers = followersCount,
-            genres = artist?.genres.orEmpty(),
-            monthlyListeners = monthlyListenersFormatted,
-            name = artist?.name,
-            artworkUrl = artist?.images?.firstOrNull()?.url,
+            followers = 0,
+            genres = emptyList(),
+            monthlyListeners = null,
+            name = knownName.takeIf { it.isNotEmpty() },
+            artworkUrl = null,
         )
     }
 
@@ -4212,6 +4266,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val id = uri.substringAfterLast(':')
 
         _playlist.value = _playlist.value.copy(following = !was)
+
+        if (!container.webApi.isReady) {
+            val currentList = _followedArtists.value.toMutableList()
+            if (was) {
+                currentList.removeAll { it.uri == uri }
+            } else {
+                currentList.add(SearchItem(uri = uri, title = page.name, subtitle = "", artworkUrl = page.artworkUrl))
+            }
+            _followedArtists.value = currentList
+            return@launch
+        }
+
         runCatching {
             if (was) container.api.unfollowArtists(ids = id) else container.api.followArtists(ids = id)
         }
