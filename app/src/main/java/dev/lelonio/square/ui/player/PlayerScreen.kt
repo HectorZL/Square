@@ -112,7 +112,6 @@ import com.adamglin.phosphoricons.fill.SkipForward
 import com.adamglin.phosphoricons.regular.CaretDown
 import com.adamglin.phosphoricons.regular.Devices
 import com.adamglin.phosphoricons.regular.DotsThree
-import com.adamglin.phosphoricons.regular.Check
 import com.adamglin.phosphoricons.regular.Heart
 import com.adamglin.phosphoricons.regular.Plus
 import com.adamglin.phosphoricons.regular.Queue
@@ -1198,22 +1197,14 @@ fun PlayerScreen(
                                     },
                                 ) {
                                     Icon(
-                                        when {
-                                            inLikedSongs -> PhosphorIcons.Fill.Heart
-                                            alreadySaved -> PhosphorIcons.Regular.Check
-                                            else -> PhosphorIcons.Regular.Heart
-                                        },
+                                        if (inLikedSongs) PhosphorIcons.Fill.Heart else PhosphorIcons.Regular.Heart,
                                         contentDescription = stringResource(
-                                            when {
-                                                inLikedSongs -> R.string.remove_from_liked
-                                                alreadySaved -> R.string.in_a_playlist
-                                                else -> R.string.liked_songs
-                                            },
+                                            if (inLikedSongs) R.string.remove_from_liked else R.string.liked_songs,
                                         ),
                                         tint = when {
                                             panel == PlayerPanel.ADD_TO_PLAYLIST ->
                                                 panelTint(true)
-                                            inLikedSongs || alreadySaved -> SavedInk
+                                            inLikedSongs -> SavedInk
                                             else -> panelTint(false)
                                         },
                                         modifier = Modifier.size(20.dp),

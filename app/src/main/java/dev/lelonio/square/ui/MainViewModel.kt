@@ -1059,6 +1059,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // and pressing it twice is how everything else undoes a like.
         val unsaving = toLibrary && current.liked
 
+        if (toLibrary) {
+            toggleLike(trackUri, current.trackTitle)
+            _addToPlaylist.value = current.copy(
+                busy = null,
+                done = if (unsaving) null else playlist.name,
+                removed = if (unsaving) playlist.name else null,
+                liked = !unsaving,
+            )
+            return
+        }
+
         _addToPlaylist.value =
             current.copy(busy = playlist.uri, done = null, removed = null, error = null)
         viewModelScope.launch {
@@ -2559,6 +2570,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _addToPlaylist.value = _addToPlaylist.value.copy(liked = nowLiked)
         }
 
+        // Build or find the CatalogTrack for immediate local collection update
+        val resolvedTrack = _playlist.value.tracks.find { it.uri == trackUri }
+            ?: contextCache.values.firstNotNullOfOrNull { entry -> entry.tracks.find { it.uri == trackUri } }
+            ?: CatalogTrack(
+                uri = trackUri,
+                name = trackTitle.orEmpty().ifEmpty { "Track" },
+                artist = artist.orEmpty(),
+                artworkUrl = artworkUrl,
+            )
+
+        // Immediately update Liked Songs in memory and disk cache
+        val colUri = runCatching { NativeBridge.collectionUri() }.getOrNull()?.takeIf { it.isNotEmpty() }
+        val targetUris = (contextCache.keys.filter { it.endsWith(":collection") } + listOfNotNull(colUri)).toSet()
+        for (cUri in targetUris) {
+            val cachedEntry = contextCache[cUri]
+            if (cachedEntry != null) {
+                val updatedList = if (nowLiked) {
+                    listOf(resolvedTrack) + cachedEntry.tracks.filterNot { it.uri == trackUri }
+                } else {
+                    cachedEntry.tracks.filterNot { it.uri == trackUri }
+                }
+                contextCache[cUri] = cachedEntry.copy(tracks = updatedList)
+                viewModelScope.launch {
+                    container.contextCache.write(cUri, updatedList, cachedEntry.snapshotId)
+                }
+            }
+        }
+
+        // If currently viewing Liked Songs screen, update UI tracks immediately
+        if (_playlist.value.uri?.endsWith(":collection") == true || (_playlist.value.uri != null && _playlist.value.uri == colUri)) {
+            val currentTracks = _playlist.value.tracks
+            val updated = if (nowLiked) {
+                listOf(resolvedTrack) + currentTracks.filterNot { it.uri == trackUri }
+            } else {
+                currentTracks.filterNot { it.uri == trackUri }
+            }
+            _playlist.value = _playlist.value.copy(tracks = updated)
+        }
+
         viewModelScope.launch {
             val syncResult = runCatching {
                 if (nowLiked) {
@@ -2571,32 +2621,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 android.util.Log.d(TAG, "toggleLike remote sync succeeded for $id (nowLiked=$nowLiked)")
             }.onFailure {
                 android.util.Log.w(TAG, "toggleLike remote sync failed for $id: ${it.message}", it)
-                // If the remote call failed and not in offline mode, revert local state
-                if (!dev.lelonio.square.playback.OfflineMode.active.value) {
-                    if (nowLiked) container.likedStore.remove(trackUri)
-                    else container.likedStore.add(trackUri)
-                    if (_addToPlaylist.value.trackUri == trackUri) {
-                        _addToPlaylist.value = _addToPlaylist.value.copy(liked = !nowLiked)
-                    }
-                    withContext(Dispatchers.Main) {
-                        android.widget.Toast.makeText(
-                            container,
-                            if (nowLiked) R.string.like_failed else R.string.unlike_failed,
-                            android.widget.Toast.LENGTH_SHORT,
-                        ).show()
-                    }
-                }
+                // Local state is authoritative on this device; do NOT revert likedStore.
             }
 
-            if (syncResult.isSuccess && container.downloadSettings.downloadLikedSongs.value) {
+            if (container.downloadSettings.downloadLikedSongs.value) {
                 if (nowLiked) {
-                    val track = CatalogTrack(
-                        uri = trackUri,
-                        name = trackTitle.orEmpty(),
-                        artist = artist.orEmpty(),
-                        artworkUrl = artworkUrl,
-                    )
-                    container.downloads.addLiked(track)
+                    container.downloads.addLiked(resolvedTrack)
                     dev.lelonio.square.download.DownloadService.start(container)
                 } else {
                     container.downloads.removeLiked(trackUri)
@@ -2698,10 +2728,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         val saved = uris.filterIndexed { index, _ -> answers.getOrNull(index) == true }
         if (saved.isNotEmpty()) container.likedStore.seed(saved)
-        val notSaved = uris.filterIndexed { index, _ -> answers.getOrNull(index) == false }
-        if (notSaved.isNotEmpty()) {
-            notSaved.forEach { container.likedStore.remove(it) }
-        }
     }
 
     /** The same question through the listener's own application. */
@@ -3501,7 +3527,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .onFailure { android.util.Log.w(TAG, "paged read failed: ${describe(it)}") }
             .getOrNull()
 
-        val tracks = paged ?: accessPointTracks(base, uri, showProgress)
+        var tracks = paged ?: accessPointTracks(base, uri, showProgress)
+        if (uri.endsWith(":collection")) {
+            val priorCached = contextCache[uri]?.tracks?.takeIf { it.isNotEmpty() }
+                ?: container.contextCache.read(uri)?.tracks?.takeIf { it.isNotEmpty() }
+            if (tracks.isEmpty() && priorCached != null) {
+                tracks = priorCached
+            }
+            val localLikedUris = container.likedStore.likedTracks.value
+            val existingUris = tracks.map { it.uri }.toSet()
+            val priorPool = (priorCached.orEmpty() + contextCache.values.flatMap { it.tracks })
+            val localExtras = priorPool
+                .filter { it.uri in localLikedUris && it.uri !in existingUris }
+                .distinctBy { it.uri }
+            if (localExtras.isNotEmpty()) {
+                tracks = localExtras + tracks
+            }
+            if (tracks.isEmpty() && localLikedUris.isNotEmpty()) {
+                val loaded = runCatching { Catalog.tracks(localLikedUris.toList()) }.getOrDefault(emptyList())
+                if (loaded.isNotEmpty()) {
+                    tracks = loaded
+                }
+            }
+            container.likedStore.seed(tracks.map { it.uri })
+        }
 
         publishPlaylist(base.copy(tracks = tracks, loadingMore = false))
 
