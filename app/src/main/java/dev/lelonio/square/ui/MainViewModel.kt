@@ -2683,19 +2683,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch {
             val trackUriFormatted = if (trackUri.startsWith("spotify:track:")) trackUri else "spotify:track:$id"
-            android.util.Log.i(TAG, "toggleLike: uri=$trackUriFormatted id=$id nowLiked=$nowLiked")
+            val userProfile = runCatching { container.api.me() }.getOrNull()
+            android.util.Log.i(TAG, "toggleLike: uri=$trackUriFormatted id=$id nowLiked=$nowLiked user=${userProfile?.id} (${userProfile?.displayName})")
 
             val syncResult = runCatching {
                 if (nowLiked) {
-                    runCatching { container.api.saveToLibrary(trackUriFormatted) }
-                        .getOrElse { container.api.saveTracks(id) }
+                    runCatching {
+                        android.util.Log.i(TAG, "toggleLike: attempting saveToLibrary($trackUriFormatted)")
+                        container.api.saveToLibrary(trackUriFormatted)
+                        "saveToLibrary"
+                    }.getOrElse { ex1 ->
+                        android.util.Log.w(TAG, "toggleLike: saveToLibrary failed: ${ex1.message}, trying saveTracks($id)", ex1)
+                        container.api.saveTracks(id)
+                        "saveTracks"
+                    }
                 } else {
-                    runCatching { container.api.removeFromLibrary(trackUriFormatted) }
-                        .getOrElse { container.api.removeSavedTracks(id) }
+                    runCatching {
+                        android.util.Log.i(TAG, "toggleLike: attempting removeFromLibrary($trackUriFormatted)")
+                        container.api.removeFromLibrary(trackUriFormatted)
+                        "removeFromLibrary"
+                    }.getOrElse { ex1 ->
+                        android.util.Log.w(TAG, "toggleLike: removeFromLibrary failed: ${ex1.message}, trying removeSavedTracks($id)", ex1)
+                        container.api.removeSavedTracks(id)
+                        "removeSavedTracks"
+                    }
                 }
             }
-            syncResult.onSuccess {
-                android.util.Log.i(TAG, "toggleLike remote sync OK for $trackUriFormatted (nowLiked=$nowLiked)")
+            syncResult.onSuccess { method ->
+                android.util.Log.i(TAG, "toggleLike remote sync OK via $method for $trackUriFormatted (nowLiked=$nowLiked)")
             }.onFailure { ex ->
                 val isForbidden = ex is HttpException && ex.code() == 403
                 if (isForbidden) {

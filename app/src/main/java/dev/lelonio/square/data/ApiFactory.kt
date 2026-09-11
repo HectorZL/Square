@@ -210,7 +210,13 @@ object ApiFactory {
                     .header("Authorization", "Bearer $token")
                     .build()
 
+                android.util.Log.i("SquareApi", "-> ${request.method} ${request.url} [candidate: ${candidate.name}]")
                 var response = chain.proceed(request)
+                android.util.Log.i("SquareApi", "<- ${response.code} ${request.url} [candidate: ${candidate.name}]")
+                if (!response.isSuccessful) {
+                    val peek = runCatching { response.peekBody(512).string() }.getOrNull()
+                    android.util.Log.w("SquareApi", "<- error body: $peek")
+                }
 
                 // If 401 Unauthorized, try forcing an immediate refresh on this token store once
                 if (response.code == 401 && candidate.store != null) {
