@@ -2954,6 +2954,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * the page underneath is then a tab, not another detail.
      */
     fun popPage(): Boolean {
+        while (pageStack.isNotEmpty() && pageStack.last().uri == _playlist.value.uri) {
+            pageStack.removeLast()
+        }
         val previous = pageStack.removeLastOrNull() ?: return false
         playlistJob?.cancel()
         _playlist.value = previous
@@ -2985,12 +2988,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 pageOnScreen && it.uri != null && it.uri != playlist.uri
             }
             ?.let {
-                pageStack.addLast(it)
-                // Deep enough to walk back through a listening session, short
-                // enough that a thousand-track playlist is not held forever.
-                while (pageStack.size > PAGE_HISTORY) pageStack.removeFirst()
-                _hasPreviousPage.value = true
-                _pageDepth.value = pageStack.size
+                if (pageStack.lastOrNull()?.uri != it.uri) {
+                    pageStack.addLast(it)
+                    // Deep enough to walk back through a listening session, short
+                    // enough that a thousand-track playlist is not held forever.
+                    while (pageStack.size > PAGE_HISTORY) pageStack.removeFirst()
+                    _hasPreviousPage.value = true
+                    _pageDepth.value = pageStack.size
+                }
             }
 
         // A station reopens as the list it already is; see [showStation].
@@ -3004,7 +3009,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // the home page should keep at the front.
         container.playlistOrder.record(playlist.uri)
 
-        if (LocalLibrary.isLocalContext(playlist.uri)) {
+        if (playlist.uri == LocalLibrary.CONTEXT_URI) {
             openLocalFiles(playlist)
             return
         }
@@ -3341,7 +3346,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Called once the listener has answered the system's permission dialog. */
     fun onLocalPermissionAnswered() {
         val open = _playlist.value
-        if (!LocalLibrary.isLocalContext(open.uri)) return
+        if (open.uri != LocalLibrary.CONTEXT_URI) return
         openLocalFiles(
             CatalogPlaylist(
                 uri = open.uri.orEmpty(),

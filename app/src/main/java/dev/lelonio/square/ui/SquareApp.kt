@@ -1249,7 +1249,9 @@ fun SquareApp(
                         sharedTrack = viewModel.resolveTrack(uri)
                     } else {
                         viewModel.openLink(uri)
-                        navController.navigate(Routes.PLAYLIST)
+                        if (navController.currentDestination?.route != Routes.PLAYLIST) {
+                            navController.navigate(Routes.PLAYLIST) { launchSingleTop = true }
+                        }
                     }
                 }
 
@@ -1453,7 +1455,7 @@ fun SquareApp(
                                 onOpenItem = { item ->
                                     viewModel.openContext(item.uri, item.title, item.artworkUrl)
                                     if (navController.currentDestination?.route != Routes.PLAYLIST) {
-                                        navController.navigate(Routes.PLAYLIST)
+                                        navController.navigate(Routes.PLAYLIST) { launchSingleTop = true }
                                     }
                                 },
                                 backdrop = artBackdrop,
@@ -1502,7 +1504,9 @@ fun SquareApp(
                                         item.title,
                                         item.artworkUrl,
                                     )
-                                    navController.navigate(Routes.PLAYLIST)
+                                    if (navController.currentDestination?.route != Routes.PLAYLIST) {
+                                        navController.navigate(Routes.PLAYLIST) { launchSingleTop = true }
+                                    }
                                 },
                             )
                         }
@@ -1517,7 +1521,9 @@ fun SquareApp(
                                 contentPadding = listPadding,
                                 onOpenMix = { mix ->
                                     viewModel.openContext(mix.uri, mix.name, mix.artworkUrl)
-                                    navController.navigate(Routes.PLAYLIST)
+                                    if (navController.currentDestination?.route != Routes.PLAYLIST) {
+                                        navController.navigate(Routes.PLAYLIST) { launchSingleTop = true }
+                                    }
                                 },
                                 onOpen = { seed ->
                                     scope.launch {
@@ -1544,7 +1550,9 @@ fun SquareApp(
                                             artworkUrl = seed.artworkUrl,
                                             tracks = tracks,
                                         )
-                                        navController.navigate(Routes.PLAYLIST)
+                                        if (navController.currentDestination?.route != Routes.PLAYLIST) {
+                                            navController.navigate(Routes.PLAYLIST) { launchSingleTop = true }
+                                        }
                                         onPlay(tracks, 0, station, true, name, 0L)
                                         }.onFailure {
                                             android.util.Log.w(
@@ -1590,7 +1598,7 @@ fun SquareApp(
                                     viewModel.recordSearchOpen(item)
                                     viewModel.openContext(item.uri, item.title, item.artworkUrl)
                                     if (navController.currentDestination?.route != Routes.PLAYLIST) {
-                                        navController.navigate(Routes.PLAYLIST)
+                                        navController.navigate(Routes.PLAYLIST) { launchSingleTop = true }
                                     }
                                 },
                                 onLoadMore = viewModel::loadMoreSearch,
@@ -1621,7 +1629,7 @@ fun SquareApp(
                                         artist.artworkUrl,
                                     )
                                     if (navController.currentDestination?.route != Routes.PLAYLIST) {
-                                        navController.navigate(Routes.PLAYLIST)
+                                        navController.navigate(Routes.PLAYLIST) { launchSingleTop = true }
                                     }
                                 },
                                 backdrop = artBackdrop,
@@ -2825,7 +2833,9 @@ fun SquareApp(
                                                         tracks = tracks,
                                                     )
                                                     expand.animateTo(0f, expandSpec)
-                                                    navController.navigate(Routes.PLAYLIST)
+                                                    if (navController.currentDestination?.route != Routes.PLAYLIST) {
+                                                        navController.navigate(Routes.PLAYLIST) { launchSingleTop = true }
+                                                    }
                                                     onPlay(
                                                         tracks,
                                                         0,
@@ -2861,7 +2871,7 @@ fun SquareApp(
                                 onOpenUri = { uri, name ->
                                     viewModel.openContext(uri, name)
                                     if (navController.currentDestination?.route != Routes.PLAYLIST) {
-                                        navController.navigate(Routes.PLAYLIST)
+                                        navController.navigate(Routes.PLAYLIST) { launchSingleTop = true }
                                     }
                                 },
                                 onAddToPlaylist = {
@@ -3151,7 +3161,9 @@ fun SquareApp(
                                 val artist = viewModel.artistOf(track)
                                 if (artist != null) {
                                     viewModel.openContext(artist.uri, artist.title, artist.artworkUrl)
-                                    navController.navigate(Routes.PLAYLIST)
+                                    if (navController.currentDestination?.route != Routes.PLAYLIST) {
+                                        navController.navigate(Routes.PLAYLIST) { launchSingleTop = true }
+                                    }
                                 }
                             }
                         }
@@ -3584,7 +3596,7 @@ private fun RowScope.BottomItem(
 private fun NavHostController.openPlaylist(viewModel: MainViewModel, playlist: CatalogPlaylist) {
     viewModel.openPlaylist(playlist)
     if (currentDestination?.route != Routes.PLAYLIST) {
-        navigate(Routes.PLAYLIST)
+        navigate(Routes.PLAYLIST) { launchSingleTop = true }
     }
 }
 
