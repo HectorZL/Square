@@ -1,5 +1,6 @@
 package dev.lelonio.square.backend.lyrics
 
+import dev.lelonio.square.data.LyricLine
 import dev.lelonio.square.data.Lyrics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -37,7 +38,12 @@ object LyricsOvh {
             for (candidate in candidates) {
                 val rawLyrics = fetch(cleanedTitle, candidate)
                 if (!rawLyrics.isNullOrBlank()) {
-                    return@withContext LyricsEstimator.estimate(rawLyrics, durationMs)
+                    val lines = rawLyrics.lines()
+                        .filter { it.isNotBlank() }
+                        .map { LyricLine(startTimeMs = null, text = it.trim()) }
+                    if (lines.isNotEmpty()) {
+                        return@withContext Lyrics(lines, synced = false)
+                    }
                 }
             }
 
