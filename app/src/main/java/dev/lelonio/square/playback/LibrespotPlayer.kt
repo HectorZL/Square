@@ -31,7 +31,7 @@ import dev.lelonio.square.nativecore.NativeEvents
  */
 @UnstableApi
 class LibrespotPlayer(
-    private val context: android.content.Context,
+    context: android.content.Context,
     looper: Looper,
     private val queue: PlayQueue,
     /**
@@ -190,13 +190,11 @@ class LibrespotPlayer(
      * Only while the setting is automatic. On a fixed choice the listener has
      * said which file they want and a stall is their business, not ours.
      */
-    private val bandwidth = BandwidthWatch(
-        onStep = { kbps ->
-            if (quality.quality.value == dev.lelonio.square.data.Quality.Auto) {
-                runCatching { dev.lelonio.square.nativecore.NativeBridge.setBitrate(kbps) }
-            }
-        },
-    )
+    private val bandwidth = BandwidthWatch { kbps ->
+        if (quality.quality.value == dev.lelonio.square.data.Quality.Auto) {
+            runCatching { dev.lelonio.square.nativecore.NativeBridge.setBitrate(kbps) }
+        }
+    }
 
     /**
      * Fires when the music should have reported progress and did not.
@@ -211,18 +209,6 @@ class LibrespotPlayer(
         // and was being counted twice — once as a slow load, once as a stall.
         if (loadInFlight) return@Runnable
         if (playWhenReady && playbackState == Player.STATE_READY) bandwidth.stalled()
-    }
-
-    /**
-     * Watches for tracks that take too long to begin playback.
-     */
-    private val loadTimeoutWatch = Runnable {
-        if (!loadInFlight) return@Runnable
-        val currentUri = queue.items.getOrNull(queue.currentIndex)?.uri
-        android.util.Log.w("SquarePlayer", "Track load timed out for $currentUri, skipping")
-        loadInFlight = false
-        bandwidth.loadFailed(currentUri)
-        skipToNextPlayable()
     }
 
     /** True between a track being asked for and that same track playing. */
@@ -782,14 +768,13 @@ class LibrespotPlayer(
             onPlaybackActive(true)
         } else {
             wantPlay = false
-            this.playWhenReady = false
+            engine("pause") { NativeBridge.pause() }
             onPlaybackActive(false)
             focus.abandonFocus()
-            engine("pause") { NativeBridge.pause() }
-            invalidateState()
         }
-        // For play, do not update local state prematurely: the engine confirms via onEvent,
-        // and reporting "playing" before audio actually starts makes the seek bar run ahead.
+        // Do not update local state here: the engine confirms via onEvent, and
+        // reporting "playing" before audio actually starts makes the seek bar
+        // run ahead of the sound.
         return Futures.immediateVoidFuture()
     }
 
@@ -1241,8 +1226,6 @@ class LibrespotPlayer(
         released = true
         watch.cancel()
         handler.removeCallbacks(settleSkip)
-        handler.removeCallbacks(stallWatch)
-        handler.removeCallbacks(loadTimeoutWatch)
         focus.release()
         engine("shutdown") { NativeBridge.shutdown() }
         return Futures.immediateVoidFuture()
@@ -1258,33 +1241,6 @@ class LibrespotPlayer(
         // behind whatever the player is in the middle of.
         if (dev.lelonio.square.download.DownloadEvents.accept(type, uri, positionMs)) return
         handler.post { applyEvent(type, uri, positionMs) }
-    }
-
-    /**
-     * Advances past unplayable tracks to the next playable track in the queue.
-     * When offline or on an unstable network, prioritizes downloaded tracks.
-     */
-    private fun skipToNextPlayable(from: Int = queue.currentIndex): Boolean {
-        val downloads = (context.applicationContext as dev.lelonio.square.SquareApplication).downloads
-        val downloadedFiles = downloads.files.value
-        val isOffline = dev.lelonio.square.playback.OfflineMode.active.value
-
-        val next = queue.items.indices.firstOrNull { index ->
-            index > from && (
-                !isOffline ||
-                queue.items[index].uri in downloadedFiles ||
-                queue.items[index].uri.startsWith("local:")
-            )
-        }
-        if (next != null) {
-            android.util.Log.i(
-                "SquarePlayer",
-                "advancing past unplayable track to index $next (${queue.items[next].uri})",
-            )
-            requestSkipTo(next, 0L)
-            return true
-        }
-        return false
     }
 
     /**
@@ -1321,17 +1277,16 @@ class LibrespotPlayer(
         val from = queue.currentIndex
         val current = queue.items.getOrNull(from) ?: return
         if (advancedFrom == current.uri) return
-
-        val downloads = (context.applicationContext as dev.lelonio.square.SquareApplication).downloads
-        val downloadedFiles = downloads.files.value
-        val next = queue.items.indices.firstOrNull { index ->
-            index > from && (queue.items[index].uri in downloadedFiles || queue.items[index].uri.startsWith("local:"))
-        } ?: return
+        val next = from + 1
+        // The end of the queue is the end. Repeat is the engine's own setting
+        // and it is not reachable from here; a queue that restarted itself
+        // offline would be doing something the listener did not ask for.
+        if (next > queue.items.lastIndex) return
 
         advancedFrom = current.uri
         android.util.Log.i(
             "SquarePlayer",
-            "offline: ${if (early) "dissolving into" else "advancing to"} track $next (${queue.items[next].uri})",
+            "offline: ${if (early) "dissolving into" else "advancing to"} track $next",
         )
         requestSkipTo(next, 0L)
     }
@@ -1414,21 +1369,12 @@ class LibrespotPlayer(
 
         when (type) {
             "loading" -> {
-                val current = queue.items.getOrNull(queue.currentIndex)?.uri
-                if (uri.isEmpty() || current == null || uri == current) {
-                    playbackState = Player.STATE_BUFFERING
-                    loadInFlight = true
-                    handler.removeCallbacks(stallWatch)
-                    handler.removeCallbacks(loadTimeoutWatch)
-                    val downloads = (context.applicationContext as dev.lelonio.square.SquareApplication).downloads.files.value
-                    if (uri.isNotEmpty() && !uri.startsWith("local:") && uri !in downloads) {
-                        handler.postDelayed(loadTimeoutWatch, LOAD_TIMEOUT_MS)
-                    }
-                }
+                playbackState = Player.STATE_BUFFERING
                 if (uri.isNotEmpty()) bandwidth.loading(uri)
+                loadInFlight = true
+                handler.removeCallbacks(stallWatch)
             }
             "playing" -> {
-                handler.removeCallbacks(loadTimeoutWatch)
                 // A new track to watch, and one this side has not moved on
                 // from yet.
                 if (uri != advancedFrom) advancedFrom = null
@@ -1444,7 +1390,6 @@ class LibrespotPlayer(
                 onPlaybackActive(true)
             }
             "paused" -> {
-                handler.removeCallbacks(loadTimeoutWatch)
                 playbackState = Player.STATE_READY
                 playWhenReady = false
                 // A pause is not a stall.
@@ -1460,23 +1405,6 @@ class LibrespotPlayer(
                 // Taking those would run the bar forward on a song that is no
                 // longer the one on screen.
                 if (skipPending || skipInFlight) return
-
-                val currentUri = queue.items.getOrNull(queue.currentIndex)?.uri
-                if (uri.isNotEmpty() && currentUri != null && uri != currentUri) {
-                    // Stale position event belonging to a different track (e.g. fading out)
-                    return
-                }
-
-                // Prevent position from jumping backwards during continuous forward playback:
-                // During track transitions, initial AudioTrack buffer latency or crossfade pacing
-                // can make early stream position reports lag slightly behind the extrapolated
-                // playback clock (e.g. 3s -> 1s). Do not snap the playback position backwards if
-                // the difference is small (< 4s), maintaining smooth forward progress.
-                val currentPos = currentPosition
-                if (playbackState == Player.STATE_READY && playWhenReady && eventPositionMs < currentPos && (currentPos - eventPositionMs) < 4_000L) {
-                    return
-                }
-
                 positionMs = eventPositionMs
 
                 // Offline, the run-up to the next track is this side's job.
@@ -1494,8 +1422,6 @@ class LibrespotPlayer(
                 }
             }
             "stopped" -> {
-                handler.removeCallbacks(loadTimeoutWatch)
-                loadInFlight = false
                 playbackState = Player.STATE_IDLE
                 playWhenReady = false
                 onPlaybackActive(false)
@@ -1555,15 +1481,8 @@ class LibrespotPlayer(
             // the listener was in the middle of because a later one was slow to
             // arrive.
             "unavailable" -> {
-                handler.removeCallbacks(loadTimeoutWatch)
-                loadInFlight = false
                 val current = queue.items.getOrNull(queue.currentIndex)?.uri
-                if (uri.isEmpty() || uri == current) {
-                    bandwidth.loadFailed(uri)
-                    if (!takeOverForQueued()) {
-                        skipToNextPlayable()
-                    }
-                }
+                if (uri.isEmpty() || uri == current) takeOverForQueued()
                 return
             }
             else -> return
@@ -1639,12 +1558,6 @@ class LibrespotPlayer(
             .build()
 
     private companion object {
-        /**
-         * How long a remote track is given to begin playback before timing out
-         * due to an unstable connection.
-         */
-        const val LOAD_TIMEOUT_MS = 12_000L
-
         /**
          * How long the music may go without reporting progress before the
          * buffer is taken to have run dry.

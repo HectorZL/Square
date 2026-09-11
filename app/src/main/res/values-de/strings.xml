@@ -30,6 +30,8 @@
     <string name="title">Titel</string>
     <string name="artist">Künstler</string>
     <string name="album">Album</string>
+    <string name="single">Single</string>
+    <string name="compilation">Kompilation</string>
     <string name="playlist">Playlist</string>
     <string name="duration">Länge</string>
     <string name="tracks">Titel</string>
@@ -387,6 +389,10 @@
     <plurals name="song_count">
         <item quantity="one">%1$d Titel</item>
         <item quantity="other">%1$d Titel</item>
+    </plurals>
+    <plurals name="monthly_listeners">
+        <item quantity="one">%s monatlicher Hörer</item>
+        <item quantity="other">%s monatliche Hörer</item>
     </plurals>
     <string name="songs_and_length">%1$d Titel, %2$s</string>
     <string name="more_notes">MEHR</string>

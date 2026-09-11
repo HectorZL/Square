@@ -3055,33 +3055,13 @@ impl PlayerInternal {
 
         if let PlayerState::Playing {
             track_id: current_track_id,
-            stream_loader_controller,
             ..
-        } = &self.state
-        {
-            if *current_track_id == track_id {
-                // we already have the requested track loaded.
-                preload_track = false;
-            } else if !stream_loader_controller.range_to_end_available() {
-                // LOCAL PATCH: Don't starve the currently playing track of bandwidth
-                // by downloading the next track while the active one is still buffering.
-                debug!("deferring preload for {track_id:?}: current track still buffering");
-                preload_track = false;
-            }
-        } else if let PlayerState::Paused {
+        }
+        | PlayerState::Paused {
             track_id: current_track_id,
-            stream_loader_controller,
             ..
-        } = &self.state
-        {
-            if *current_track_id == track_id {
-                // we already have the requested track loaded.
-                preload_track = false;
-            } else if !stream_loader_controller.range_to_end_available() {
-                debug!("deferring preload for {track_id:?}: paused track still buffering");
-                preload_track = false;
-            }
-        } else if let PlayerState::EndOfTrack {
+        }
+        | PlayerState::EndOfTrack {
             track_id: current_track_id,
             ..
         } = &self.state

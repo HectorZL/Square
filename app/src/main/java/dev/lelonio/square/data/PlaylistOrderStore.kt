@@ -66,26 +66,23 @@ class PlaylistOrderStore(context: Context) {
  * A fixed shelf rather than a playlist among playlists; see LocalLibrary.
  */
 fun List<CatalogPlaylist>.withLocalFilesFirst(): List<CatalogPlaylist> {
-    val local = firstOrNull { LocalLibrary.isLocalContext(it.uri) } ?: return this
-    return listOf(local) + filterNot { it.uri == local.uri }
+    val local = firstOrNull { LocalLibrary.isLocalContext(it.uri) }
+    val downloads = firstOrNull { it.uri == DownloadStore.SINGLES }
+    val head = listOfNotNull(local, downloads)
+    if (head.isEmpty()) return this
+    val headUris = head.map { it.uri }.toSet()
+    return head + filterNot { it.uri in headUris }
 }
 
 /**
  * Moves the "Liked Songs" playlist (Spotify collection, URI ends with ":collection")
- * to the second position, right after the local-files shelf.
- *
- * The user asked for: 1st downloaded music, 2nd liked music. This companion to
- * withLocalFilesFirst() implements the second half of that order.
+ * right after the fixed shelves (local files and downloads).
  */
 fun List<CatalogPlaylist>.withLikedSecond(): List<CatalogPlaylist> {
     val liked = firstOrNull { it.uri.endsWith(":collection") } ?: return this
-    // Keep position 0 (local files) in place if it exists, insert liked at position 1.
     val without = filterNot { it.uri == liked.uri }
-    return if (without.isNotEmpty() && LocalLibrary.isLocalContext(without.firstOrNull()?.uri)) {
-        listOf(without.first(), liked) + without.drop(1)
-    } else {
-        listOf(liked) + without
-    }
+    val fixedCount = without.takeWhile { LocalLibrary.isLocalContext(it.uri) || it.uri == DownloadStore.SINGLES }.size
+    return without.take(fixedCount) + listOf(liked) + without.drop(fixedCount)
 }
 
 fun List<CatalogPlaylist>.sortedByRecentlyOpened(order: List<String>): List<CatalogPlaylist> {

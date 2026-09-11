@@ -113,14 +113,12 @@ class NetworkWatch(context: Context, private val scope: CoroutineScope) {
         val network = connectivity?.activeNetwork ?: return false
         val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
         val hasInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-        val validated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
         val isWifi = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
         val isEthernet = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
         val isCellular = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
         val isVpn = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
 
-        return (hasInternet && (validated || isWifi || isEthernet || isCellular || isVpn)) ||
-            validated || isWifi || isEthernet
+        return hasInternet && (isWifi || isEthernet || isCellular || isVpn)
     }
 
     private companion object {

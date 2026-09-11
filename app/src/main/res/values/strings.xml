@@ -41,6 +41,8 @@
     <string name="title">Title</string>
     <string name="artist">Artist</string>
     <string name="album">Album</string>
+    <string name="single">Single</string>
+    <string name="compilation">Compilation</string>
     <string name="playlist">Playlist</string>
     <string name="duration">Length</string>
     <string name="tracks">Songs</string>
@@ -316,7 +318,7 @@
     <string name="effect_quality_light">Light</string>
     <string name="effect_quality_light_note">The phone does the work. Kinder to older devices, rougher on attacks.</string>
     <string name="liked_songs">Liked Songs</string>
-    <string name="local_files">Downloaded music</string>
+    <string name="local_files">Local files</string>
     <string name="local_files_needs_permission">Square can see the music on this phone once you allow it.</string>
     <string name="local_files_allow">Allow</string>
     <string name="pinned">Pinned</string>
@@ -408,6 +410,10 @@
     <plurals name="song_count">
         <item quantity="one">%1$d song</item>
         <item quantity="other">%1$d songs</item>
+    </plurals>
+    <plurals name="monthly_listeners">
+        <item quantity="one">%s monthly listener</item>
+        <item quantity="other">%s monthly listeners</item>
     </plurals>
     <string name="songs_and_length">%1$d songs, %2$s</string>
     <string name="more_notes">MORE</string>

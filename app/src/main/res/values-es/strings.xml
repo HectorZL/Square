@@ -30,6 +30,8 @@
     <string name="title">Título</string>
     <string name="artist">Artista</string>
     <string name="album">Álbum</string>
+    <string name="single">Sencillo</string>
+    <string name="compilation">Recopilación</string>
     <string name="playlist">Playlist</string>
     <string name="duration">Duración</string>
     <string name="tracks">Canciones</string>
@@ -295,7 +297,7 @@
     <string name="effect_quality_light">Ligera</string>
     <string name="effect_quality_light_note">Lo hace el teléfono. Más amable con los equipos antiguos, más áspera en los ataques.</string>
     <string name="liked_songs">Tus me gusta</string>
-    <string name="local_files">Música descargada</string>
+    <string name="local_files">Archivos locales</string>
     <string name="local_files_needs_permission">Square puede ver la música de este teléfono si le das permiso.</string>
     <string name="local_files_allow">Permitir</string>
     <string name="pinned">Fijada</string>
@@ -387,6 +389,10 @@
     <plurals name="song_count">
         <item quantity="one">%1$d canción</item>
         <item quantity="other">%1$d canciones</item>
+    </plurals>
+    <plurals name="monthly_listeners">
+        <item quantity="one">%s oyente mensual</item>
+        <item quantity="other">%s oyentes mensuales</item>
     </plurals>
     <string name="songs_and_length">%1$d canciones, %2$s</string>
     <string name="more_notes">MÁS</string>

@@ -1,6 +1,8 @@
 package dev.lelonio.square.data
 
+import android.content.res.Resources
 import android.util.Base64
+import dev.lelonio.square.R
 import dev.lelonio.square.ui.MainViewModel.ArtistPage
 import dev.lelonio.square.ui.MainViewModel.ArtistRelease
 import kotlinx.coroutines.Dispatchers
@@ -9,6 +11,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Resolves artist top tracks, albums, singles, followers, and monthly listeners
@@ -23,10 +27,20 @@ object SpotifyWebArtist {
     private const val TAG = "SpotifyWebArtist"
     private val scriptRegex = Regex("<script[^>]*>(.*?)</script>", RegexOption.DOT_MATCHES_ALL)
 
+    /** Session cache to prevent redundant scrapes across multiple callers. */
+    private val sessionCache = ConcurrentHashMap<String, ArtistPage>()
+
+    fun clearCache() {
+        sessionCache.clear()
+    }
+
     suspend fun fetch(
         artistId: String,
         client: OkHttpClient,
+        resources: Resources? = null,
     ): ArtistPage? = withContext(Dispatchers.IO) {
+        sessionCache[artistId]?.let { return@withContext it }
+
         val url = "https://open.spotify.com/artist/$artistId"
         val request = Request.Builder()
             .url(url)
@@ -34,7 +48,7 @@ object SpotifyWebArtist {
                 "User-Agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             )
-            .header("Accept-Language", java.util.Locale.getDefault().language)
+            .header("Accept-Language", Locale.getDefault().language)
             .build()
 
         runCatching {
@@ -44,14 +58,18 @@ object SpotifyWebArtist {
                     return@withContext null
                 }
                 val html = response.body?.string() ?: return@withContext null
-                parseHtml(html, artistId)
+                val page = parseHtml(html, artistId, resources)
+                if (page != null) {
+                    sessionCache[artistId] = page
+                }
+                page
             }
         }.onFailure {
             android.util.Log.w(TAG, "Failed to load web artist $artistId: ${it.message}")
         }.getOrNull()
     }
 
-    fun parseHtml(html: String, artistId: String): ArtistPage? {
+    fun parseHtml(html: String, artistId: String, resources: Resources? = null): ArtistPage? {
         val matches = scriptRegex.findAll(html)
         for (match in matches) {
             val content = match.groupValues[1].trim()
@@ -71,12 +89,12 @@ object SpotifyWebArtist {
                 ?: items.keys().asSequence().firstOrNull { it.startsWith("spotify:artist:") }?.let { items.optJSONObject(it) }
                 ?: continue
 
-            return parseArtistData(artistData, artistId)
+            return parseArtistData(artistData, artistId, resources)
         }
         return null
     }
 
-    private fun parseArtistData(data: JSONObject, artistId: String): ArtistPage {
+    private fun parseArtistData(data: JSONObject, artistId: String, resources: Resources?): ArtistPage {
         val profile = data.optJSONObject("profile")
         val name = profile?.optString("name").orEmpty()
         val biography = profile?.optJSONObject("biography")?.optString("text")
@@ -86,18 +104,17 @@ object SpotifyWebArtist {
         val monthlyListenersCount = stats?.optLong("monthlyListeners") ?: 0L
 
         val monthlyListenersFormatted = if (monthlyListenersCount > 0) {
-            when {
-                monthlyListenersCount >= 1_000_000 -> String.format(
-                    java.util.Locale.US,
-                    "%.1f M oyentes mensuales",
-                    monthlyListenersCount / 1_000_000.0,
-                )
-                monthlyListenersCount >= 1_000 -> String.format(
-                    java.util.Locale.US,
-                    "%.1f K oyentes mensuales",
-                    monthlyListenersCount / 1_000.0,
-                )
-                else -> "$monthlyListenersCount oyentes mensuales"
+            val locale = Locale.getDefault()
+            val formattedCount = when {
+                monthlyListenersCount >= 1_000_000 -> String.format(locale, "%.1f M", monthlyListenersCount / 1_000_000.0)
+                monthlyListenersCount >= 1_000 -> String.format(locale, "%.1f K", monthlyListenersCount / 1_000.0)
+                else -> String.format(locale, "%,d", monthlyListenersCount)
+            }
+            if (resources != null) {
+                val quantity = monthlyListenersCount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                resources.getQuantityString(R.plurals.monthly_listeners, quantity, formattedCount)
+            } else {
+                formattedCount
             }
         } else null
 
@@ -135,6 +152,15 @@ object SpotifyWebArtist {
 
                 val explicit = track.optJSONObject("contentRating")?.optString("label") == "EXPLICIT"
 
+                // Extract real duration from Spotify entity:
+                // Typically duration.totalMilliseconds or trackDuration.totalMilliseconds or duration_ms
+                val durationMs = track.optJSONObject("duration")?.optLong("totalMilliseconds")
+                    ?: track.optJSONObject("trackDuration")?.optLong("totalMilliseconds")
+                    ?: track.optLong("durationMs")
+                    ?: track.optLong("duration_ms")
+                    ?: track.optLong("duration")
+                    ?: 0L
+
                 tracks.add(
                     CatalogTrack(
                         uri = uri,
@@ -143,7 +169,7 @@ object SpotifyWebArtist {
                         artistUri = credited.firstOrNull()?.uri,
                         artists = credited,
                         album = albumName,
-                        durationMs = 0L,
+                        durationMs = durationMs,
                         explicit = explicit,
                         artworkUrl = coverArt,
                     ),
@@ -151,10 +177,12 @@ object SpotifyWebArtist {
             }
         }
 
+        data class ReleaseEntry(val item: SearchItem, val year: Int)
+
         fun extractReleases(sectionKey: String): List<SearchItem> {
             val section = disco?.optJSONObject(sectionKey)
             val items = section?.optJSONArray("items") ?: return emptyList()
-            val list = mutableListOf<SearchItem>()
+            val list = mutableListOf<ReleaseEntry>()
             for (i in 0 until items.length()) {
                 val group = items.optJSONObject(i) ?: continue
                 val releases = group.optJSONObject("releases")?.optJSONArray("items") ?: continue
@@ -165,28 +193,36 @@ object SpotifyWebArtist {
 
                     val title = rel.optString("name")
                     val type = rel.optString("type")
-                    val year = rel.optJSONObject("date")?.optInt("year")?.takeIf { it > 0 }?.toString()
-                        ?: rel.optString("date").take(4)
+                    val yearInt = rel.optJSONObject("date")?.optInt("year")?.takeIf { it > 0 }
+                        ?: rel.optString("date").take(4).toIntOrNull()
+                        ?: 0
+                    val yearStr = if (yearInt > 0) yearInt.toString() else ""
+
                     val label = when (type) {
-                        "SINGLE" -> "Sencillo"
-                        "ALBUM" -> "Álbum"
-                        "COMPILATION" -> "Recopilación"
+                        "SINGLE" -> resources?.getString(R.string.single) ?: "Single"
+                        "ALBUM" -> resources?.getString(R.string.album) ?: "Album"
+                        "COMPILATION" -> resources?.getString(R.string.compilation) ?: "Compilation"
                         else -> ""
                     }
-                    val subtitle = if (label.isNotEmpty() && year.isNotEmpty()) "$label • $year" else year.ifEmpty { label }
+                    val subtitle = if (label.isNotEmpty() && yearStr.isNotEmpty()) "$label • $yearStr" else yearStr.ifEmpty { label }
                     val cover = extractBestImage(rel.optJSONObject("coverArt")?.optJSONArray("sources"), 300)
 
                     list.add(
-                        SearchItem(
-                            uri = uri,
-                            title = title,
-                            subtitle = subtitle,
-                            artworkUrl = cover,
+                        ReleaseEntry(
+                            item = SearchItem(
+                                uri = uri,
+                                title = title,
+                                subtitle = subtitle,
+                                artworkUrl = cover,
+                            ),
+                            year = yearInt,
                         ),
                     )
                 }
             }
-            return list.distinctBy { it.title.lowercase() }.sortedByDescending { it.subtitle }
+            return list.distinctBy { it.item.title.lowercase() }
+                .sortedByDescending { it.year }
+                .map { it.item }
         }
 
         val albumsList = extractReleases("albums") + extractReleases("compilations")

@@ -84,7 +84,7 @@ class PreferencesStore(context: Context) {
         prefs.edit().putBoolean(KEY_CANVAS, value).apply()
     }
 
-    private val _autoplayInfinite = MutableStateFlow(prefs.getBoolean(KEY_AUTOPLAY_INFINITE, true))
+    private val _autoplayInfinite = MutableStateFlow(prefs.getBoolean(KEY_AUTOPLAY_INFINITE, false))
 
     /** Whether playback automatically appends similar tracks when reaching queue end. */
     val autoplayInfinite: StateFlow<Boolean> = _autoplayInfinite.asStateFlow()

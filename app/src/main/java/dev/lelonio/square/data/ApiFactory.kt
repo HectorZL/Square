@@ -43,12 +43,15 @@ object ApiFactory {
         countryProvider: (() -> String)? = null,
         debug: Boolean = false,
     ): SpotifyApi {
-        val client = (baseClient?.newBuilder() ?: OkHttpClient.Builder())
+        val clientBuilder = (baseClient?.newBuilder() ?: OkHttpClient.Builder())
             .addInterceptor(AuthInterceptor(tokens))
             .addInterceptor(RateLimitInterceptor())
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .apply {
+                if (countryProvider != null) {
+                    addInterceptor(MarketInterceptor(countryProvider))
+                }
                 if (debug) {
                     addInterceptor(
                         okhttp3.logging.HttpLoggingInterceptor().setLevel(
@@ -154,7 +157,7 @@ object ApiFactory {
              * showing an error the user can only answer by tapping retry —
              * which costs another request against the same quota.
              */
-            const val MAX_WAIT_SECONDS = 3L
+            const val MAX_WAIT_SECONDS = 90L
             const val TAG = "SquareApi"
         }
     }

@@ -76,6 +76,8 @@ class BandwidthWatch(
      * A track load failed over the network (e.g. timeout or unavailable).
      */
     fun loadFailed(uri: String? = null) {
+        if (uri != null && loadingUri != null && loadingUri != uri) return
+        Log.i(TAG, "track load failed for ${uri ?: loadingUri}, stepping down")
         loadingUri = null
         loadStartedAt = 0L
         stepDown()

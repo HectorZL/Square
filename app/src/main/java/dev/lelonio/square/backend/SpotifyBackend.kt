@@ -158,20 +158,21 @@ class SpotifyBackend(private val container: SquareApplication) : MusicBackend {
     override suspend fun tracksOf(uri: String): List<CatalogTrack> = when {
         uri.startsWith("spotify:artist:") -> {
             val id = uri.substringAfterLast(':')
-            val webTracks = runCatching {
-                dev.lelonio.square.data.SpotifyWebArtist.fetch(id, container.sharedHttpClient)?.tracks
-            }.getOrNull()?.takeIf { it.isNotEmpty() }
-            if (webTracks != null) {
-                webTracks
-            } else if (container.webApi.isReady) {
+            val apiTracks = if (container.webApi.isReady) {
                 runCatching {
                     container.api.artistTopTracks(id, market = container.userCountry).tracks
                         .map { it.toCatalogTrack() }
-                }.getOrElse {
-                    Catalog.tracks(Catalog.contextTrackUris(uri).take(10))
-                }
+                }.getOrNull()?.takeIf { it.isNotEmpty() }
+            } else null
+
+            if (apiTracks != null) {
+                apiTracks
             } else {
-                Catalog.tracks(Catalog.contextTrackUris(uri).take(10))
+                val webTracks = runCatching {
+                    dev.lelonio.square.data.SpotifyWebArtist.fetch(id, container.sharedHttpClient, container.resources)?.tracks
+                }.getOrNull()?.takeIf { it.isNotEmpty() }
+
+                webTracks ?: Catalog.tracks(Catalog.contextTrackUris(uri).take(10))
             }
         }
 
