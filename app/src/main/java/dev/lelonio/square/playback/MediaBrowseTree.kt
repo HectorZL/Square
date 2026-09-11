@@ -241,13 +241,8 @@ class MediaBrowseTree(
             android.util.Log.i(TAG, "toggleLike: uri=$trackUriFormatted id=$id nowLiked=$nowLiked")
 
             val callResult = runCatching {
-                if (nowLiked) {
-                    runCatching { app.api.saveToLibrary(trackUriFormatted) }
-                        .getOrElse { app.api.saveTracks(id) }
-                } else {
-                    runCatching { app.api.removeFromLibrary(trackUriFormatted) }
-                        .getOrElse { app.api.removeSavedTracks(id) }
-                }
+                if (nowLiked) app.api.saveTracks(id)
+                else app.api.removeSavedTracks(id)
             }
             callResult.onSuccess {
                 android.util.Log.i(TAG, "toggleLike remote sync OK for $trackUriFormatted (nowLiked=$nowLiked)")
