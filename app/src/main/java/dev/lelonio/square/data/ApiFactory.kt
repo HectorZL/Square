@@ -226,8 +226,8 @@ object ApiFactory {
                     }
                 }
 
-                // If successful or an expected response (not 401 Unauthorized and not 403 Forbidden), return it
-                if (response.isSuccessful || (response.code != 401 && response.code != 403)) {
+                // If successful or an expected response (not 401 Unauthorized, not 403 Forbidden, and not 429 Rate Limited when candidates remain), return it
+                if (response.isSuccessful || (response.code != 401 && response.code != 403 && response.code != 429)) {
                     return response
                 }
 
