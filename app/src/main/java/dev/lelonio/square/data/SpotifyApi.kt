@@ -338,41 +338,14 @@ interface SpotifyApi {
         val EMPTY_BODY: RequestBody = ByteArray(0).toRequestBody("application/json".toMediaType())
     }
 
-    /**
-     * Modern unified library endpoint for saving tracks, albums, etc.
-     * Uses query parameter `uris` with Spotify URIs (e.g. `spotify:track:...`).
-     * OkHttp requires a RequestBody for PUT; passing empty bytes with application/json sends Content-Length: 0.
-     */
-    @PUT("v1/me/library")
-    suspend fun saveToLibrary(
-        @Query("uris") uris: String,
-        @Body body: RequestBody,
-    )
-
-    /**
-     * Modern unified library endpoint for removing tracks, albums, etc.
-     */
-    @DELETE("v1/me/library")
-    suspend fun removeFromLibrary(
-        @Query("uris") uris: String,
-    )
-
-    /**
-     * Modern unified library endpoint to check whether items are in the user's library.
-     */
-    @GET("v1/me/library/contains")
-    suspend fun libraryContains(
-        @Query("uris") uris: String,
-    ): List<Boolean>
-
-    /** Saves tracks to Liked Songs (legacy endpoint). */
+    /** Saves tracks to Liked Songs. */
     @PUT("v1/me/tracks")
     suspend fun saveTracks(
         @Query("ids") ids: String,
         @Body request: IdsDto = IdsDto(ids.split(",").map { it.trim() }),
     )
 
-    /** And takes them out again (legacy endpoint). */
+    /** And takes them out again. */
     @HTTP(method = "DELETE", path = "v1/me/tracks", hasBody = true)
     suspend fun removeSavedTracks(
         @Query("ids") ids: String,
@@ -404,9 +377,6 @@ interface SpotifyApi {
         @Query("offset") offset: Int = 0,
     ): SearchDto
 }
-
-/** Extension for saving to library with standard empty application/json body. */
-suspend fun SpotifyApi.saveToLibrary(uris: String): Unit = saveToLibrary(uris, SpotifyApi.EMPTY_BODY)
 
 
 @Serializable

@@ -20,7 +20,6 @@ import dev.lelonio.square.R
 import dev.lelonio.square.SquareApplication
 import dev.lelonio.square.data.Catalog
 import dev.lelonio.square.data.CatalogTrack
-import dev.lelonio.square.data.saveToLibrary
 import dev.lelonio.square.data.toCatalogTrack
 import dev.lelonio.square.nativecore.NativeBridge
 import dev.lelonio.square.ui.EXTRA_CONTEXT_LABEL
@@ -238,22 +237,17 @@ class MediaBrowseTree(
         }
 
         scope.launch {
-            val trackUriFormatted = if (uri.startsWith("spotify:track:")) uri else "spotify:track:$id"
-            android.util.Log.i(TAG, "toggleLike: uri=$trackUriFormatted id=$id nowLiked=$nowLiked")
-
             val callResult = runCatching {
                 if (nowLiked) {
-                    runCatching { app.api.saveToLibrary(trackUriFormatted) }
-                        .getOrElse { app.api.saveTracks(id) }
+                    app.api.saveTracks(id)
                 } else {
-                    runCatching { app.api.removeFromLibrary(trackUriFormatted) }
-                        .getOrElse { app.api.removeSavedTracks(id) }
+                    app.api.removeSavedTracks(id)
                 }
             }
             callResult.onSuccess {
-                android.util.Log.i(TAG, "toggleLike remote sync OK for $trackUriFormatted (nowLiked=$nowLiked)")
+                android.util.Log.i(TAG, "toggleLike remote sync OK for $id (nowLiked=$nowLiked)")
             }.onFailure { ex ->
-                android.util.Log.e(TAG, "toggleLike remote sync failed for $id: ${ex.message}", ex)
+                android.util.Log.w(TAG, "toggleLike remote sync failed for $id: ${ex.message}", ex)
             }
 
             if (app.downloadSettings.downloadLikedSongs.value) {

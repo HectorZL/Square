@@ -1799,7 +1799,11 @@ fn transport(
         // back as an error, so the app saw a pause that had been accepted and a
         // player that went on regardless. The load path has taken this step
         // since it was written; the transport path never did.
-        let _ = engine.spirc().map(|spirc| spirc.activate());
+        let _ = engine.spirc().map(|spirc| {
+            if !spirc.is_active() {
+                let _ = spirc.activate();
+            }
+        });
         via_spirc(engine)
     } {
         Ok(()) => Ok(()),
