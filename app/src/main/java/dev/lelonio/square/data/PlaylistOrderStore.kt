@@ -66,9 +66,9 @@ class PlaylistOrderStore(context: Context) {
  * A fixed shelf rather than a playlist among playlists; see LocalLibrary.
  */
 fun List<CatalogPlaylist>.withLocalFilesFirst(): List<CatalogPlaylist> {
-    val local = firstOrNull { LocalLibrary.isLocalContext(it.uri) }
+    val local = firstOrNull { it.uri == LocalLibrary.CONTEXT_URI }
     val downloads = firstOrNull { it.uri == DownloadStore.SINGLES }
-    val head = listOfNotNull(local, downloads)
+    val head = listOfNotNull(local, downloads).distinctBy { it.uri }
     if (head.isEmpty()) return this
     val headUris = head.map { it.uri }.toSet()
     return head + filterNot { it.uri in headUris }
@@ -81,7 +81,7 @@ fun List<CatalogPlaylist>.withLocalFilesFirst(): List<CatalogPlaylist> {
 fun List<CatalogPlaylist>.withLikedSecond(): List<CatalogPlaylist> {
     val liked = firstOrNull { it.uri.endsWith(":collection") } ?: return this
     val without = filterNot { it.uri == liked.uri }
-    val fixedCount = without.takeWhile { LocalLibrary.isLocalContext(it.uri) || it.uri == DownloadStore.SINGLES }.size
+    val fixedCount = without.takeWhile { it.uri == LocalLibrary.CONTEXT_URI || it.uri == DownloadStore.SINGLES }.size
     return without.take(fixedCount) + listOf(liked) + without.drop(fixedCount)
 }
 
