@@ -247,6 +247,8 @@ class SquareApplication : Application(), ImageLoaderFactory {
     val api: SpotifyApi by lazy {
         ApiFactory.create(
             tokens = webApi.tokens,
+            fallbackTokens = tokenStore,
+            nativeToken = { dev.lelonio.square.nativecore.NativeBridge.accessToken() },
             baseClient = sharedHttpClient,
             countryProvider = { userCountry },
             debug = BuildConfig.DEBUG,

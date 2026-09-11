@@ -331,14 +331,39 @@ interface SpotifyApi {
         @Query("ids") userIds: String,
     ): List<Boolean>
 
-    /** Saves tracks to Liked Songs, which is what the heart in the player says. */
+    /**
+     * Modern unified library endpoint for saving tracks, albums, etc.
+     * Uses query parameter `uris` with Spotify URIs (e.g. `spotify:track:...`).
+     */
+    @HTTP(method = "PUT", path = "v1/me/library", hasBody = false)
+    suspend fun saveToLibrary(
+        @Query("uris") uris: String,
+    )
+
+    /**
+     * Modern unified library endpoint for removing tracks, albums, etc.
+     */
+    @DELETE("v1/me/library")
+    suspend fun removeFromLibrary(
+        @Query("uris") uris: String,
+    )
+
+    /**
+     * Modern unified library endpoint to check whether items are in the user's library.
+     */
+    @GET("v1/me/library/contains")
+    suspend fun libraryContains(
+        @Query("uris") uris: String,
+    ): List<Boolean>
+
+    /** Saves tracks to Liked Songs (legacy endpoint). */
     @PUT("v1/me/tracks")
     suspend fun saveTracks(
         @Query("ids") ids: String,
         @Body request: IdsDto = IdsDto(ids.split(",").map { it.trim() }),
     )
 
-    /** And takes them out again, which is the heart pressed a second time. */
+    /** And takes them out again (legacy endpoint). */
     @HTTP(method = "DELETE", path = "v1/me/tracks", hasBody = true)
     suspend fun removeSavedTracks(
         @Query("ids") ids: String,

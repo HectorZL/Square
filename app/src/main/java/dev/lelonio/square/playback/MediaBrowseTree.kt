@@ -237,11 +237,22 @@ class MediaBrowseTree(
         }
 
         scope.launch {
+            val trackUriFormatted = if (uri.startsWith("spotify:track:")) uri else "spotify:track:$id"
             val callResult = runCatching {
                 if (nowLiked) {
-                    app.api.saveTracks(id)
+                    runCatching { app.api.saveToLibrary(trackUriFormatted) }
+                        .onFailure {
+                            android.util.Log.d(TAG, "saveToLibrary failed ($it), falling back to saveTracks")
+                            app.api.saveTracks(id)
+                        }
+                        .getOrThrow()
                 } else {
-                    app.api.removeSavedTracks(id)
+                    runCatching { app.api.removeFromLibrary(trackUriFormatted) }
+                        .onFailure {
+                            android.util.Log.d(TAG, "removeFromLibrary failed ($it), falling back to removeSavedTracks")
+                            app.api.removeSavedTracks(id)
+                        }
+                        .getOrThrow()
                 }
             }
             callResult.onSuccess {

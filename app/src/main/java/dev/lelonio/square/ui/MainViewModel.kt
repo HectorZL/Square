@@ -1075,8 +1075,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runCatching {
                 when {
-                    unsaving -> container.api.removeSavedTracks(trackUri.substringAfterLast(':'))
-                    toLibrary -> container.api.saveTracks(trackUri.substringAfterLast(':'))
+                    unsaving -> {
+                        runCatching { container.api.removeFromLibrary(trackUri) }
+                            .getOrElse { container.api.removeSavedTracks(trackUri.substringAfterLast(':')) }
+                    }
+                    toLibrary -> {
+                        runCatching { container.api.saveToLibrary(trackUri) }
+                            .getOrElse { container.api.saveTracks(trackUri.substringAfterLast(':')) }
+                    }
                     else -> container.api.addToPlaylist(id, AddTracksRequestDto(listOf(trackUri)))
                 }
             }
@@ -2617,11 +2623,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         viewModelScope.launch {
+            val trackUriFormatted = if (trackUri.startsWith("spotify:track:")) trackUri else "spotify:track:$id"
             val syncResult = runCatching {
                 if (nowLiked) {
-                    container.api.saveTracks(id)
+                    runCatching { container.api.saveToLibrary(trackUriFormatted) }
+                        .onFailure {
+                            android.util.Log.d(TAG, "saveToLibrary failed ($it), falling back to saveTracks")
+                            container.api.saveTracks(id)
+                        }
+                        .getOrThrow()
                 } else {
-                    container.api.removeSavedTracks(id)
+                    runCatching { container.api.removeFromLibrary(trackUriFormatted) }
+                        .onFailure {
+                            android.util.Log.d(TAG, "removeFromLibrary failed ($it), falling back to removeSavedTracks")
+                            container.api.removeSavedTracks(id)
+                        }
+                        .getOrThrow()
                 }
             }
             syncResult.onSuccess {
@@ -2741,7 +2758,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun webApiSaved(uris: List<String>): List<Boolean>? {
         if (!container.webApi.isReady && !container.tokenStore.isLoggedIn) return null
         return runCatching {
-            container.api.tracksAreSaved(uris.joinToString(",") { it.substringAfterLast(':') })
+            val joinedUris = uris.joinToString(",")
+            runCatching { container.api.libraryContains(joinedUris) }
+                .getOrElse {
+                    container.api.tracksAreSaved(uris.joinToString(",") { it.substringAfterLast(':') })
+                }
         }
             .onFailure { android.util.Log.i(TAG, "cannot tell what is saved: ${describe(it)}") }
             .getOrNull()

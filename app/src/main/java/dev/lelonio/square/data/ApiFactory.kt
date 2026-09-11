@@ -39,12 +39,14 @@ object ApiFactory {
      */
     fun create(
         tokens: TokenStore,
+        fallbackTokens: TokenStore? = null,
+        nativeToken: (() -> String?)? = null,
         baseClient: OkHttpClient? = null,
         countryProvider: (() -> String)? = null,
         debug: Boolean = false,
     ): SpotifyApi {
         val clientBuilder = (baseClient?.newBuilder() ?: OkHttpClient.Builder())
-            .addInterceptor(AuthInterceptor(tokens))
+            .addInterceptor(AuthInterceptor(tokens, fallbackTokens, nativeToken))
             .addInterceptor(RateLimitInterceptor())
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
@@ -177,6 +179,7 @@ object ApiFactory {
             // its own thread, which takes the whole process down instead of
             // failing the one call.
             var usedFallback = false
+            var usedNative = false
             val token = try {
                 runBlocking {
                     if (tokens.isLoggedIn) {
@@ -187,6 +190,7 @@ object ApiFactory {
                                 usedFallback = true
                                 fallbackTokens.validAccessToken()
                             } else {
+                                usedNative = true
                                 nativeToken?.invoke() ?: throw e
                             }
                         }
@@ -194,6 +198,7 @@ object ApiFactory {
                         usedFallback = true
                         fallbackTokens.validAccessToken()
                     } else {
+                        usedNative = true
                         nativeToken?.invoke() ?: tokens.validAccessToken()
                     }
                 }
@@ -208,24 +213,27 @@ object ApiFactory {
                 .build()
             val response = chain.proceed(request)
 
-            // If the primary token is refused (401 or 403, for instance because the custom app
-            // was authorized before user-library-modify scope was added), retry with the account's session token.
-            if ((response.code == 401 || response.code == 403) && !usedFallback && (fallbackTokens?.isLoggedIn == true || nativeToken?.invoke() != null)) {
-                android.util.Log.w("SquareApi", "HTTP ${response.code} with Web API token; retrying with account session token")
+            // If the current token is refused (401 or 403), retry with the next available token
+            if ((response.code == 401 || response.code == 403) && (!usedFallback || !usedNative)) {
+                android.util.Log.w("SquareApi", "HTTP ${response.code} with current token; retrying with backup token")
                 response.close()
-                val fallbackToken = try {
+                val nextToken = try {
                     runBlocking {
-                        if (fallbackTokens?.isLoggedIn == true) {
+                        if (!usedFallback && fallbackTokens?.isLoggedIn == true) {
+                            usedFallback = true
                             fallbackTokens.validAccessToken()
+                        } else if (!usedNative) {
+                            usedNative = true
+                            nativeToken?.invoke() ?: throw IOException("no backup token available")
                         } else {
-                            nativeToken?.invoke() ?: throw IOException("no fallback token available")
+                            throw IOException("no backup token available")
                         }
                     }
                 } catch (e: Exception) {
                     throw IOException("could not obtain fallback access token", e)
                 }
                 val retryRequest = chain.request().newBuilder()
-                    .header("Authorization", "Bearer $fallbackToken")
+                    .header("Authorization", "Bearer $nextToken")
                     .build()
                 return chain.proceed(retryRequest)
             }
