@@ -55,6 +55,7 @@ object SpotifyLyrics {
             ?: Lossless.lyrics(title, artist, durationMs)
             ?: Catalog.lyrics(uri)
             ?: LrcLib.lyrics(title, artist, durationMs)
+            ?: NetEase.lyrics(title, artist, durationMs)
             ?: LyricsOvh.lyrics(title, artist, durationMs)
 
         sessionCache.put(uri, Cached(found))
