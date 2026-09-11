@@ -4,6 +4,7 @@ import dev.lelonio.square.auth.TokenStore
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.OkHttpClient
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -170,75 +171,88 @@ object ApiFactory {
         private val nativeToken: (() -> String?)? = null,
     ) : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
-            // OkHttp interceptors are blocking by contract and always run on a
-            // background thread, so bridging into the suspending token store
-            // with runBlocking is safe here.
-            //
-            // Everything must leave as an IOException: OkHttp's async dispatcher
-            // only routes IOException to onFailure and rethrows anything else on
-            // its own thread, which takes the whole process down instead of
-            // failing the one call.
-            var usedFallback = false
-            var usedNative = false
-            val token = try {
-                runBlocking {
-                    if (tokens.isLoggedIn) {
-                        try {
-                            tokens.validAccessToken()
-                        } catch (e: Exception) {
-                            if (fallbackTokens?.isLoggedIn == true) {
-                                usedFallback = true
-                                fallbackTokens.validAccessToken()
-                            } else {
-                                usedNative = true
-                                nativeToken?.invoke() ?: throw e
-                            }
-                        }
-                    } else if (fallbackTokens?.isLoggedIn == true) {
-                        usedFallback = true
-                        fallbackTokens.validAccessToken()
-                    } else {
-                        usedNative = true
-                        nativeToken?.invoke() ?: tokens.validAccessToken()
-                    }
-                }
+            try {
+                return proceedWithAuth(chain)
             } catch (e: IOException) {
                 throw e
             } catch (e: Exception) {
-                throw IOException("could not obtain a Spotify access token", e)
+                throw IOException("AuthInterceptor failed: ${e.message}", e)
             }
+        }
 
-            val request = chain.request().newBuilder()
-                .header("Authorization", "Bearer $token")
-                .build()
-            val response = chain.proceed(request)
-
-            // If the current token is refused (401 or 403), retry with the next available token
-            if ((response.code == 401 || response.code == 403) && (!usedFallback || !usedNative)) {
-                android.util.Log.w("SquareApi", "HTTP ${response.code} with current token; retrying with backup token")
-                response.close()
-                val nextToken = try {
-                    runBlocking {
-                        if (!usedFallback && fallbackTokens?.isLoggedIn == true) {
-                            usedFallback = true
-                            fallbackTokens.validAccessToken()
-                        } else if (!usedNative) {
-                            usedNative = true
-                            nativeToken?.invoke() ?: throw IOException("no backup token available")
-                        } else {
-                            throw IOException("no backup token available")
-                        }
-                    }
-                } catch (e: Exception) {
-                    throw IOException("could not obtain fallback access token", e)
+        private fun proceedWithAuth(chain: Interceptor.Chain): Response {
+            val candidates = buildList<Candidate> {
+                if (tokens.isLoggedIn) {
+                    add(Candidate("webApi", tokens))
                 }
-                val retryRequest = chain.request().newBuilder()
-                    .header("Authorization", "Bearer $nextToken")
-                    .build()
-                return chain.proceed(retryRequest)
+                if (fallbackTokens?.isLoggedIn == true) {
+                    add(Candidate("account", fallbackTokens))
+                }
+                if (nativeToken != null) {
+                    add(Candidate("native", null, nativeToken))
+                }
             }
 
-            return response
+            if (candidates.isEmpty()) {
+                throw IOException("No Spotify access token available; user is not logged in")
+            }
+
+            var lastResponse: Response? = null
+
+            for ((index, candidate) in candidates.withIndex()) {
+                val token = runCatching {
+                    runBlocking { candidate.getToken() }
+                }.getOrNull()
+
+                if (token == null) continue
+
+                val request = chain.request().newBuilder()
+                    .header("Authorization", "Bearer $token")
+                    .build()
+
+                var response = chain.proceed(request)
+
+                // If 401 Unauthorized, try forcing an immediate refresh on this token store once
+                if (response.code == 401 && candidate.store != null) {
+                    val refreshed = runCatching {
+                        runBlocking { candidate.store.forceRefresh() }
+                    }.getOrNull()
+                    if (refreshed != null) {
+                        response.close()
+                        val retryRequest = chain.request().newBuilder()
+                            .header("Authorization", "Bearer $refreshed")
+                            .build()
+                        response = chain.proceed(retryRequest)
+                    }
+                }
+
+                // If successful or an expected response (not 401 Unauthorized and not 403 Forbidden), return it
+                if (response.isSuccessful || (response.code != 401 && response.code != 403)) {
+                    return response
+                }
+
+                val hasMoreCandidates = index < candidates.lastIndex
+                if (hasMoreCandidates) {
+                    android.util.Log.w("SquareApi", "HTTP ${response.code} with ${candidate.name} token; closing response and trying next candidate")
+                    response.close()
+                } else {
+                    lastResponse = response
+                }
+            }
+
+            return lastResponse ?: chain.proceed(chain.request())
+        }
+
+        private class Candidate(
+            val name: String,
+            val store: TokenStore?,
+            val supplier: (() -> String?)? = null,
+        ) {
+            suspend fun getToken(): String? = when {
+                store != null -> store.validAccessToken()
+                supplier != null -> supplier.invoke()
+                else -> null
+            }
         }
     }
 }

@@ -1325,14 +1325,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * token is only valid for the application it was issued to, so the Web API
      * needs its own even though it is the same Spotify account behind both.
      */
-    fun connectWebApi() = viewModelScope.launch {
-        val clientId = _webApi.value.clientId.trim()
-        if (clientId.isEmpty()) {
-            _webApi.value = _webApi.value.copy(error = string(R.string.enter_client_id))
-            return@launch
-        }
+    private var webApiJob: Job? = null
 
-        _webApi.value = _webApi.value.copy(connecting = true, error = null, expired = false)
+    fun connectWebApi() {
+        webApiJob?.takeIf { it.isActive }?.let { return }
+        webApiJob = viewModelScope.launch {
+            val clientId = _webApi.value.clientId.trim()
+            if (clientId.isEmpty()) {
+                _webApi.value = _webApi.value.copy(error = string(R.string.enter_client_id))
+                return@launch
+            }
+
+            _webApi.value = _webApi.value.copy(connecting = true, error = null, expired = false)
         container.webApi.setClientId(clientId)
         runCatching {
             // Search needs no scope — it reads public catalogue data — but the
@@ -1388,6 +1392,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 android.util.Log.e(TAG, "web api login failed: ${chain(it)}", it)
                 _webApi.value = _webApi.value.copy(connecting = false, error = describe(it))
             }
+        }
     }
 
     fun disconnectWebApi() {
@@ -1693,23 +1698,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun logIn() = viewModelScope.launch {
-        _state.value = UiState.Loading
-        runCatching { SpotifyOAuth.authorize(getApplication()) }
-            .onSuccess {
-                container.tokenStore.save(it)
-                // The service was created before this session existed, so it has
-                // to be told to authenticate the native engine now.
-                PlaybackService.connect(getApplication())
-                refresh()
-            }
-            .onFailure {
-                android.util.Log.e(TAG, "login failed: ${chain(it)}", it)
-                _state.value = UiState.Failed(describe(it))
-            }
+    private var loginJob: Job? = null
+
+    fun logIn() {
+        loginJob?.takeIf { it.isActive }?.let { return }
+        loginJob = viewModelScope.launch {
+            _state.value = UiState.Loading
+            runCatching { SpotifyOAuth.authorize(getApplication()) }
+                .onSuccess {
+                    container.tokenStore.save(it)
+                    // The service was created before this session existed, so it has
+                    // to be told to authenticate the native engine now.
+                    PlaybackService.connect(getApplication())
+                    refresh()
+                }
+                .onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) return@launch
+                    android.util.Log.e(TAG, "login failed: ${chain(it)}", it)
+                    _state.value = UiState.Failed(describe(it))
+                }
+        }
+    }
+
+    /** Retries login if not signed in yet, or refreshes the library if signed in. */
+    fun retryFailed() {
+        if (!container.spotifySignedIn && container.activeBackend.id == BackendId.SPOTIFY) {
+            logIn()
+        } else {
+            refresh()
+        }
     }
 
     fun logOut() {
+        loginJob?.cancel()
+        SpotifyOAuth.cancelActiveAuthorization()
         container.tokenStore.clear()
         container.webApi.disconnect()
         // The engine's own credential too, or the next launch would log itself
@@ -4639,6 +4661,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * or an empty wrapper, which is how "unknown error" screens happen.
      */
     private fun describe(error: Throwable): String {
+        if (error is java.net.BindException || error.message?.contains("EADDRINUSE") == true) {
+            return string(R.string.cannot_connect)
+        }
         val parts = generateSequence(error, Throwable::cause)
             .mapNotNull { it.message?.takeIf(String::isNotBlank) }
             .toList()

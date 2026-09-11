@@ -962,29 +962,30 @@ fun SquareApp(
 
     // Fetched per track. Most of the catalogue has none, so a null result is an
     // ordinary answer that shows an empty state rather than an error.
-    LaunchedEffect(playback.mediaId) {
+    LaunchedEffect(playback.mediaId, playback.title, playback.artist) {
         val uri = playback.mediaId
-        lyrics = null
-        lyricsFor = null
         if (uri == null) {
+            lyrics = null
             lyricsFor = null
             return@LaunchedEffect
         }
         val isRemote = remote != null
-        if (!isRemote) {
-            // Behind the song as well; see awaitAudible. The panel shows its own
-            // spinner meanwhile, so the wait is visible rather than blank.
-            awaitAudible(localState)
-        }
-
-        // Read metadata from active playback state (supporting both Spotify Connect
-        // remote playback and local player playback).
+        // Lyrics are lightweight text — fetch them immediately without delay.
+        // Wait until title and artist metadata have arrived to avoid fetching
+        // with empty strings and polluting the session cache with false nulls.
         val currentTitle = if (isRemote) playback.title else localState.value.title.ifBlank { playback.title }
         val currentArtist = if (isRemote) playback.artist else localState.value.artist.ifBlank { playback.artist }
         val currentDuration = if (isRemote && playback.durationMs > 0) {
             playback.durationMs
         } else {
             localState.value.durationMs.takeIf { it > 0 } ?: playback.durationMs
+        }
+
+        if (currentTitle.isBlank()) return@LaunchedEffect
+
+        if (lyricsFor != uri) {
+            lyrics = null
+            lyricsFor = null
         }
 
         if (playback.mediaId != uri && localState.value.mediaId != uri) return@LaunchedEffect
@@ -1440,7 +1441,7 @@ fun SquareApp(
                                 state = state,
                                 contentPadding = listPadding,
                                 onLogIn = viewModel::logIn,
-                                onRetry = { viewModel.refresh() },
+                                onRetry = { viewModel.retryFailed() },
                                 onLogOut = viewModel::logOut,
                                 onOpenPlaylist = { navController.openPlaylist(viewModel, it) },
                                 playlistOrder = playlistOrder,
@@ -1611,7 +1612,7 @@ fun SquareApp(
                                 state = state,
                                 contentPadding = listPadding,
                                 onLogIn = viewModel::logIn,
-                                onRetry = { viewModel.refresh() },
+                                onRetry = { viewModel.retryFailed() },
                                 onLogOut = viewModel::logOut,
                                 onOpenPlaylist = { navController.openPlaylist(viewModel, it) },
                                 playlistOrder = playlistOrder,

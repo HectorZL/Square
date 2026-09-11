@@ -2,6 +2,9 @@ package dev.lelonio.square.data
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
@@ -331,13 +334,19 @@ interface SpotifyApi {
         @Query("ids") userIds: String,
     ): List<Boolean>
 
+    companion object {
+        val EMPTY_BODY: RequestBody = ByteArray(0).toRequestBody(null, 0, 0)
+    }
+
     /**
      * Modern unified library endpoint for saving tracks, albums, etc.
      * Uses query parameter `uris` with Spotify URIs (e.g. `spotify:track:...`).
+     * OkHttp requires a RequestBody for PUT; passing empty bytes sends Content-Length: 0 without Content-Type.
      */
-    @HTTP(method = "PUT", path = "v1/me/library", hasBody = false)
+    @PUT("v1/me/library")
     suspend fun saveToLibrary(
         @Query("uris") uris: String,
+        @Body body: RequestBody = EMPTY_BODY,
     )
 
     /**

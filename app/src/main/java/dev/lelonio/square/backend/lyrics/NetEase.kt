@@ -72,10 +72,21 @@ object NetEase {
         var bestSongId: Long? = null
         var minDiff = Long.MAX_VALUE
 
-        for (i in 0 until songs.length().coerceAtMost(5)) {
+        val targetArtistLower = artist.lowercase().trim()
+        val hasTargetArtist = targetArtistLower.isNotEmpty()
+
+        for (i in 0 until songs.length().coerceAtMost(10)) {
             val song = songs.optJSONObject(i) ?: continue
             val id = song.optLong("id")
             if (id <= 0) continue
+
+            val songArtists = (0 until (song.optJSONArray("artists")?.length() ?: 0)).mapNotNull {
+                song.optJSONArray("artists")?.optJSONObject(it)?.optString("name")?.lowercase()
+            }
+            val matchesArtist = !hasTargetArtist || songArtists.any { it.contains(targetArtistLower) || targetArtistLower.contains(it) }
+
+            // If we have a target artist, skip songs that don't match it
+            if (hasTargetArtist && !matchesArtist) continue
 
             val songDur = song.optLong("duration", 0L)
             val diff = if (durationMs > 0 && songDur > 0) kotlin.math.abs(songDur - durationMs) else 0L
@@ -86,15 +97,9 @@ object NetEase {
             }
         }
 
-        // Only accept if duration is close (within 5 seconds) or duration wasn't specified
-        if (durationMs > 0 && minDiff > 5000L) {
-            // Check if top match title resembles our query closely
-            val topSong = songs.optJSONObject(0) ?: return null
-            val topDur = topSong.optLong("duration", 0L)
-            if (durationMs > 0 && topDur > 0 && kotlin.math.abs(topDur - durationMs) > 8000L) {
-                return null
-            }
-            bestSongId = topSong.optLong("id").takeIf { it > 0 } ?: return null
+        // Only accept if duration is close (within 8 seconds) or duration wasn't specified
+        if (durationMs > 0 && minDiff > 8000L && bestSongId != null) {
+            return null
         }
 
         val targetId = bestSongId ?: return null
