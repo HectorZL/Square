@@ -4094,6 +4094,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val biography: String? = null,
     )
 
+    private data class BasicArtistMeta(val name: String, val artworkUrl: String?, val followers: Int)
+
+    private suspend fun fetchArtistMetadata(id: String): BasicArtistMeta? = withContext(Dispatchers.IO) {
+        val token = dev.lelonio.square.nativecore.NativeBridge.accessToken() ?: return@withContext null
+        runCatching {
+            val request = okhttp3.Request.Builder()
+                .url("https://api.spotify.com/v1/artists/$id")
+                .header("Authorization", "Bearer $token")
+                .build()
+            container.sharedHttpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val json = org.json.JSONObject(response.body.string())
+                val name = json.optString("name").takeIf { it.isNotEmpty() } ?: return@withContext null
+                val img = json.optJSONArray("images")?.optJSONObject(0)?.optString("url")
+                val followers = json.optJSONObject("followers")?.optInt("total") ?: 0
+                BasicArtistMeta(name, img, followers)
+            }
+        }.getOrNull()
+    }
+
     private suspend fun loadArtist(uri: String, knownName: String = ""): ArtistPage = coroutineScope {
         val id = uri.substringAfterLast(':')
         val market = userCountry
@@ -4105,14 +4125,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     withTimeoutOrNull(3000L) {
                         container.api.artistTopTracks(id, market = market).tracks.map { it.toCatalogTrack() }
                     }
-                }.getOrNull().orEmpty().take(5)
+                }.getOrNull()?.takeIf { it.isNotEmpty() }
+                    ?: runCatching {
+                        withTimeoutOrNull(3000L) {
+                            container.api.artistTopTracks(id, market = "from_token").tracks.map { it.toCatalogTrack() }
+                        }
+                    }.getOrNull()?.takeIf { it.isNotEmpty() }
+                    ?: runCatching {
+                        withTimeoutOrNull(3000L) {
+                            container.api.artistTopTracks(id, market = "US").tracks.map { it.toCatalogTrack() }
+                        }
+                    }.getOrNull().orEmpty().take(5)
             }
             val releasesDeferred = async {
                 runCatching {
                     withTimeoutOrNull(3000L) {
                         container.api.artistAlbums(artistId = id, groups = "album,single", limit = 50, market = market).items
                     }
-                }.getOrNull().orEmpty()
+                }.getOrNull()?.takeIf { it.isNotEmpty() }
+                    ?: runCatching {
+                        withTimeoutOrNull(3000L) {
+                            container.api.artistAlbums(artistId = id, groups = "album,single", limit = 50, market = null).items
+                        }
+                    }.getOrNull().orEmpty()
             }
             val artistDeferred = async {
                 runCatching { withTimeoutOrNull(2000L) { container.api.artist(id) } }.getOrNull()
@@ -4121,10 +4156,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching { withTimeoutOrNull(2000L) { container.api.isFollowing(ids = id).firstOrNull() } }.getOrNull()
             }
 
-            val tracks = tracksDeferred.await()
+            var tracks = tracksDeferred.await()
             val releases = releasesDeferred.await()
             val artist = artistDeferred.await()
             val following = followingDeferred.await()
+            val resolvedName = artist?.name ?: knownName
+
+            // If Web API returned the artist info but 0 top tracks, don't leave tracks empty!
+            // Query Gateway search or native context tracks as fallback
+            if (tracks.isEmpty() && resolvedName.isNotEmpty()) {
+                val searchRes = runCatching {
+                    container.gateway.search(resolvedName)?.let {
+                        dev.lelonio.square.data.GatewaySearch.parse(
+                            it,
+                            dev.lelonio.square.backend.SearchLabels(
+                                artist = string(R.string.artist),
+                                album = string(R.string.album),
+                                playlist = string(R.string.playlist),
+                            ),
+                        )
+                    }
+                }.getOrNull()
+
+                if (searchRes != null && searchRes.tracks.isNotEmpty()) {
+                    tracks = searchRes.tracks
+                        .filter { it.artists.any { a -> a.name.contains(resolvedName, ignoreCase = true) } }
+                        .ifEmpty { searchRes.tracks }
+                        .take(5)
+                }
+            }
+
+            if (tracks.isEmpty()) {
+                val nativeTracks = runCatching {
+                    Catalog.tracks(Catalog.contextTrackUris(uri).take(10))
+                }.getOrNull()
+                if (!nativeTracks.isNullOrEmpty()) {
+                    tracks = nativeTracks.take(5)
+                }
+            }
 
             if (tracks.isNotEmpty() || releases.isNotEmpty() || artist != null) {
                 if (following != null) {
@@ -4164,18 +4233,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val followersCount = artist?.followers?.total ?: 0
                 val monthlyListenersFormatted = formatMonthlyListeners(followersCount.toLong())
 
+                var albumsList = shelf("album", "compilation")
+                var singlesList = shelf("single")
+
+                // If releases were empty, enrich from Gateway search if available
+                if (albumsList.isEmpty() && singlesList.isEmpty() && resolvedName.isNotEmpty()) {
+                    val searchRes = runCatching {
+                        container.gateway.search(resolvedName)?.let {
+                            dev.lelonio.square.data.GatewaySearch.parse(
+                                it,
+                                dev.lelonio.square.backend.SearchLabels(
+                                    artist = string(R.string.artist),
+                                    album = string(R.string.album),
+                                    playlist = string(R.string.playlist),
+                                ),
+                            )
+                        }
+                    }.getOrNull()
+                    if (searchRes != null && searchRes.albums.isNotEmpty()) {
+                        albumsList = searchRes.albums
+                    }
+                }
+
                 return@coroutineScope ArtistPage(
                     playlists = emptyList(),
                     tracks = tracks,
                     latest = null,
-                    albums = shelf("album", "compilation"),
-                    singles = shelf("single"),
+                    albums = albumsList,
+                    singles = singlesList,
                     appearsOn = emptyList(),
                     relatedArtists = emptyList(),
                     followers = followersCount,
                     genres = artist?.genres.orEmpty(),
                     monthlyListeners = monthlyListenersFormatted,
-                    name = artist?.name,
+                    name = resolvedName.takeIf { it.isNotEmpty() },
                     artworkUrl = artist?.images?.firstOrNull()?.url,
                 )
             }
@@ -4205,8 +4296,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return@coroutineScope webArtist.copy(tracks = enrichedTracks.take(5))
         }
 
+        // Resolve artist name & metadata if knownName is empty
+        val meta = if (knownName.isEmpty()) fetchArtistMetadata(id) else null
+        val searchName = knownName.ifEmpty { meta?.name.orEmpty() }.ifEmpty { webArtist?.name.orEmpty() }
+
         // Tertiary fallback: Gateway search if web scraper fails
-        val searchName = knownName.ifEmpty { webArtist?.name.orEmpty() }
         if (searchName.isNotEmpty()) {
             val searchRes = runCatching {
                 container.gateway.search(searchName)?.let {
@@ -4221,7 +4315,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }.getOrNull()
 
-            if (searchRes != null && searchRes.tracks.isNotEmpty()) {
+            if (searchRes != null && (searchRes.tracks.isNotEmpty() || searchRes.albums.isNotEmpty())) {
                 val matchedTracks = searchRes.tracks
                     .filter { it.artists.any { a -> a.name.contains(searchName, ignoreCase = true) } }
                     .ifEmpty { searchRes.tracks }
@@ -4233,6 +4327,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (it.uri == uri) it.copy(following = isFollowed) else it
                 }
 
+                val followers = meta?.followers ?: webArtist?.followers ?: 0
+                val artwork = meta?.artworkUrl ?: webArtist?.artworkUrl
+
                 return@coroutineScope ArtistPage(
                     playlists = searchRes.playlists,
                     tracks = matchedTracks,
@@ -4241,11 +4338,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     singles = emptyList(),
                     appearsOn = emptyList(),
                     relatedArtists = emptyList(),
-                    followers = webArtist?.followers ?: 0,
+                    followers = followers,
                     genres = emptyList(),
-                    monthlyListeners = webArtist?.monthlyListeners,
+                    monthlyListeners = formatMonthlyListeners(followers.toLong()) ?: webArtist?.monthlyListeners,
                     name = searchName,
-                    artworkUrl = webArtist?.artworkUrl,
+                    artworkUrl = artwork,
                     biography = webArtist?.biography,
                 )
             }
@@ -4269,11 +4366,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             singles = emptyList(),
             appearsOn = emptyList(),
             relatedArtists = emptyList(),
-            followers = 0,
+            followers = meta?.followers ?: 0,
             genres = emptyList(),
-            monthlyListeners = null,
-            name = knownName.takeIf { it.isNotEmpty() },
-            artworkUrl = null,
+            monthlyListeners = meta?.followers?.let { formatMonthlyListeners(it.toLong()) },
+            name = searchName.takeIf { it.isNotEmpty() },
+            artworkUrl = meta?.artworkUrl,
         )
     }
 

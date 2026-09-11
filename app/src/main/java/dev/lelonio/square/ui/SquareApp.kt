@@ -924,8 +924,10 @@ fun SquareApp(
         ) {
             // After the song, not beside it: a Canvas is a video, and fetching
             // one while the track is still arriving takes the connection the
-            // track needs. See awaitAudible.
-            awaitAudible(localState)
+            // track needs. See awaitAudible. Only wait when playing locally.
+            if (remote == null) {
+                awaitAudible(localState)
+            }
             // The copy kept beside a download first, and not only offline: it
             // is the same clip, it is already here, and playing it costs
             // nothing. Offline it is the only one there is — the answer names a
@@ -968,38 +970,42 @@ fun SquareApp(
             lyricsFor = null
             return@LaunchedEffect
         }
-        // Behind the song as well; see awaitAudible. The panel shows its own
-        // spinner meanwhile, so the wait is visible rather than blank.
-        awaitAudible(localState)
+        val isRemote = remote != null
+        if (!isRemote) {
+            // Behind the song as well; see awaitAudible. The panel shows its own
+            // spinner meanwhile, so the wait is visible rather than blank.
+            awaitAudible(localState)
+        }
 
-        // Read again here, rather than used as they were when this started.
-        //
-        // The id and the metadata do not arrive together: the player reports
-        // the new item as soon as it has one, and the title and artist land a
-        // moment later. Asking with what was in hand at launch meant asking for
-        // the *previous* song's words and then filing them under this song's
-        // id, which is why the panel kept showing the last track's lyrics until
-        // it was opened again.
-        //
-        // The two providers this ends up in — the TTML archive keyed by id, and
-        // LrcLib keyed by title and artist — disagree about which is authority,
-        // so both halves have to describe the same song.
-        val now = localState.value
-        if (now.mediaId != uri) return@LaunchedEffect
+        // Read metadata from active playback state (supporting both Spotify Connect
+        // remote playback and local player playback).
+        val currentTitle = if (isRemote) playback.title else localState.value.title.ifBlank { playback.title }
+        val currentArtist = if (isRemote) playback.artist else localState.value.artist.ifBlank { playback.artist }
+        val currentDuration = if (isRemote && playback.durationMs > 0) {
+            playback.durationMs
+        } else {
+            localState.value.durationMs.takeIf { it > 0 } ?: playback.durationMs
+        }
+
+        if (playback.mediaId != uri && localState.value.mediaId != uri) return@LaunchedEffect
+
         lyrics = runCatching {
             (context.applicationContext as dev.lelonio.square.SquareApplication)
                 .activeBackend
                 .lyrics(
                     uri = uri,
-                    title = now.title,
-                    artist = now.artist,
-                    durationMs = now.durationMs,
+                    title = currentTitle,
+                    artist = currentArtist,
+                    durationMs = currentDuration,
                 )
         }.getOrNull()
-        // Only if this is still the song being played. A slow answer for a
-        // track the listener has already skipped past would otherwise replace
-        // the words of the one they are on now.
-        if (localState.value.mediaId == uri) lyricsFor = uri else lyrics = null
+
+        // Only if this is still the song being played. Dismiss the spinner by assigning lyricsFor.
+        if (playback.mediaId == uri || localState.value.mediaId == uri) {
+            lyricsFor = uri
+        } else {
+            lyrics = null
+        }
     }
 
     // The language the app is read in. Changing it re-creates the activity,
