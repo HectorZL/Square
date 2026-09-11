@@ -27,6 +27,30 @@ internal fun String.primaryArtist(): String =
         ?.ifEmpty { this.trim() }
         ?: this.trim()
 
+/**
+ * Extracts all distinct artists from collaboration strings like "Artist A, Artist B",
+ * "Artist A & Artist B", or "Artist A feat. Artist B".
+ */
+internal fun String.allArtists(): List<String> {
+    val candidates = mutableListOf<String>()
+    val raw = this.trim()
+    if (raw.isNotBlank()) candidates += raw
+
+    val splitArtists = split(',', '&', '/', ';')
+        .flatMap { part ->
+            part.split(Regex("\\s+(?:feat|ft)\\.?\\s+", RegexOption.IGNORE_CASE))
+        }
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+
+    for (artist in splitArtists) {
+        if (artist !in candidates) {
+            candidates += artist
+        }
+    }
+    return candidates
+}
+
 private val NOISE = Regex(
     "\\((?:official|lyric|audio|video|visualizer|hd|4k|mv|m/v)[^)]*\\)" +
         "|\\[[^\\]]*(?:official|lyric|audio|video|remaster|hd|4k)[^\\]]*\\]",

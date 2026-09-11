@@ -52,31 +52,24 @@ object LrcLib {
             }
 
             if (body != null) {
-                parseJson(body)?.let { return@withContext it }
+                parseJson(body, durationMs)?.let { return@withContext it }
             }
 
             // 4. Fallback search via /api/search when exact lookup misses
             search(cleaned, primary, durationMs)
         }
 
-    private fun parseJson(body: String): Lyrics? {
+    private fun parseJson(body: String, durationMs: Long): Lyrics? {
         val json = runCatching { JSONObject(body) }.getOrNull() ?: return null
 
         json.optString("syncedLyrics").takeIf { it.isNotBlank() }?.let { synced ->
             return parseLrc(synced)
         }
         json.optString("plainLyrics").takeIf { it.isNotBlank() }?.let { plain ->
-            return parsePlain(plain)
+            return LyricsEstimator.estimate(plain, durationMs)
         }
         return null
     }
-
-    private fun parsePlain(plain: String): Lyrics = Lyrics(
-        lines = plain.lines()
-            .filter { it.isNotBlank() }
-            .map { LyricLine(startTimeMs = null, text = it.trim()) },
-        synced = false,
-    )
 
     private fun search(title: String, artist: String, durationMs: Long): Lyrics? {
         val query = "$title $artist".trim()
@@ -107,7 +100,7 @@ object LrcLib {
                     bestSynced = parseLrc(synced)
                 }
             } else if (plain != null && bestPlain == null && diff <= 5.0) {
-                bestPlain = parsePlain(plain)
+                bestPlain = LyricsEstimator.estimate(plain, durationMs)
             }
         }
 

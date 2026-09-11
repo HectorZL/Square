@@ -9,6 +9,7 @@ import dev.lelonio.square.backend.PlaybackHost
 import dev.lelonio.square.backend.SearchLabels
 import dev.lelonio.square.backend.lyrics.LrcLib
 import dev.lelonio.square.backend.lyrics.Lossless
+import dev.lelonio.square.backend.lyrics.LyricsOvh
 import dev.lelonio.square.data.CatalogPlaylist
 import dev.lelonio.square.data.CatalogTrack
 import dev.lelonio.square.data.Lyrics
@@ -352,6 +353,7 @@ class YouTubeBackend(private val account: YouTubeAccount) : MusicBackend {
 
         val found = Lossless.lyrics(title, artist, durationMs)
             ?: LrcLib.lyrics(title, artist, durationMs)
+            ?: LyricsOvh.lyrics(title, artist, durationMs)
 
         if (found != null) {
             runCatching { DownloadExtras.rememberLyrics(uri, lyricsJson.encodeToString(found)) }
