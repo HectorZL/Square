@@ -335,18 +335,18 @@ interface SpotifyApi {
     ): List<Boolean>
 
     companion object {
-        val EMPTY_BODY: RequestBody = ByteArray(0).toRequestBody(null, 0, 0)
+        val EMPTY_BODY: RequestBody = ByteArray(0).toRequestBody("application/json".toMediaType())
     }
 
     /**
      * Modern unified library endpoint for saving tracks, albums, etc.
      * Uses query parameter `uris` with Spotify URIs (e.g. `spotify:track:...`).
-     * OkHttp requires a RequestBody for PUT; passing empty bytes sends Content-Length: 0 without Content-Type.
+     * OkHttp requires a RequestBody for PUT; passing empty bytes with application/json sends Content-Length: 0.
      */
     @PUT("v1/me/library")
     suspend fun saveToLibrary(
         @Query("uris") uris: String,
-        @Body body: RequestBody = EMPTY_BODY,
+        @Body body: RequestBody,
     )
 
     /**
@@ -404,6 +404,10 @@ interface SpotifyApi {
         @Query("offset") offset: Int = 0,
     ): SearchDto
 }
+
+/** Extension for saving to library with standard empty application/json body. */
+suspend fun SpotifyApi.saveToLibrary(uris: String): Unit = saveToLibrary(uris, SpotifyApi.EMPTY_BODY)
+
 
 @Serializable
 data class IdsDto(val ids: List<String>)

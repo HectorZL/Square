@@ -31,6 +31,7 @@ import dev.lelonio.square.data.TransferRequestDto
 import dev.lelonio.square.data.SearchResults
 import dev.lelonio.square.data.toCatalogTrack
 import dev.lelonio.square.data.toResults
+import dev.lelonio.square.data.saveToLibrary
 import dev.lelonio.square.nativecore.NativeBridge
 import dev.lelonio.square.playback.BuiltInPresets
 import dev.lelonio.square.playback.EffectPreset
@@ -1077,8 +1078,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val formattedTrackUri = if (trackUri.startsWith("spotify:track:")) trackUri else "spotify:track:$trackUri"
             runCatching {
                 when {
-                    unsaving -> container.api.removeSavedTracks(formattedTrackUri.substringAfterLast(':'))
-                    toLibrary -> container.api.saveTracks(formattedTrackUri.substringAfterLast(':'))
+                    unsaving -> {
+                        runCatching { container.api.removeFromLibrary(formattedTrackUri) }
+                            .getOrElse { container.api.removeSavedTracks(formattedTrackUri.substringAfterLast(':')) }
+                    }
+                    toLibrary -> {
+                        runCatching { container.api.saveToLibrary(formattedTrackUri) }
+                            .getOrElse { container.api.saveTracks(formattedTrackUri.substringAfterLast(':')) }
+                    }
                     else -> container.api.addToPlaylist(id, AddTracksRequestDto(listOf(trackUri)))
                 }
             }
@@ -2232,12 +2239,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * than showing a state nobody checked.
      */
     private suspend fun savedState(uri: String): Boolean? {
-        if (!container.webApi.isReady) return null
+        if (!container.webApi.isReady && !container.tokenStore.isLoggedIn) return null
         val id = uri.substringAfterLast(':')
         return runCatching {
             when {
                 uri.startsWith("spotify:album:") ->
-                    container.api.albumsAreSaved(id).firstOrNull()
+                    runCatching { container.api.libraryContains(uri).firstOrNull() }
+                        .getOrElse { container.api.albumsAreSaved(id).firstOrNull() }
 
                 uri.startsWith("spotify:playlist:") ->
                     container.api.playlistIsFollowed(id, container.api.me().id).firstOrNull()
@@ -2646,6 +2654,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 viewModelScope.launch {
                     container.contextCache.write(cUri, updatedList, cachedEntry.snapshotId)
                 }
+            } else if (cUri.isNotEmpty()) {
+                viewModelScope.launch {
+                    val diskEntry = container.contextCache.read(cUri)
+                    if (diskEntry != null) {
+                        val updatedList = if (nowLiked) {
+                            listOf(resolvedTrack) + diskEntry.tracks.filterNot { it.uri == trackUri }
+                        } else {
+                            diskEntry.tracks.filterNot { it.uri == trackUri }
+                        }
+                        contextCache[cUri] = diskEntry.copy(tracks = updatedList)
+                        container.contextCache.write(cUri, updatedList, diskEntry.snapshotId)
+                    }
+                }
             }
         }
 
@@ -2665,15 +2686,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             android.util.Log.i(TAG, "toggleLike: uri=$trackUriFormatted id=$id nowLiked=$nowLiked")
 
             val syncResult = runCatching {
-                if (nowLiked) container.api.saveTracks(id)
-                else container.api.removeSavedTracks(id)
+                if (nowLiked) {
+                    runCatching { container.api.saveToLibrary(trackUriFormatted) }
+                        .getOrElse { container.api.saveTracks(id) }
+                } else {
+                    runCatching { container.api.removeFromLibrary(trackUriFormatted) }
+                        .getOrElse { container.api.removeSavedTracks(id) }
+                }
             }
             syncResult.onSuccess {
                 android.util.Log.i(TAG, "toggleLike remote sync OK for $trackUriFormatted (nowLiked=$nowLiked)")
             }.onFailure { ex ->
                 val isForbidden = ex is HttpException && ex.code() == 403
-                if (isForbidden && container.webApi.isReady) {
-                    _webApi.value = _webApi.value.copy(expired = true)
+                if (isForbidden) {
+                    if (container.webApi.isReady) {
+                        _webApi.value = _webApi.value.copy(expired = true)
+                    }
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(
+                            getApplication(),
+                            R.string.permission_needed,
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
                 }
                 android.util.Log.e(TAG, "toggleLike remote sync failed for $id: ${ex.message}", ex)
                 // Local state is authoritative on this device; do NOT revert likedStore.
@@ -2789,7 +2824,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun webApiSaved(uris: List<String>): List<Boolean>? {
         if (!container.webApi.isReady && !container.tokenStore.isLoggedIn) return null
         return runCatching {
-            container.api.tracksAreSaved(uris.joinToString(",") { it.substringAfterLast(':') })
+            val joinedUris = uris.joinToString(",")
+            runCatching { container.api.libraryContains(joinedUris) }
+                .getOrElse {
+                    container.api.tracksAreSaved(uris.joinToString(",") { it.substringAfterLast(':') })
+                }
         }
             .onFailure { android.util.Log.i(TAG, "cannot tell what is saved: ${describe(it)}") }
             .getOrNull()

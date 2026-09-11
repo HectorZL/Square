@@ -20,6 +20,7 @@ import dev.lelonio.square.R
 import dev.lelonio.square.SquareApplication
 import dev.lelonio.square.data.Catalog
 import dev.lelonio.square.data.CatalogTrack
+import dev.lelonio.square.data.saveToLibrary
 import dev.lelonio.square.data.toCatalogTrack
 import dev.lelonio.square.nativecore.NativeBridge
 import dev.lelonio.square.ui.EXTRA_CONTEXT_LABEL
@@ -241,8 +242,13 @@ class MediaBrowseTree(
             android.util.Log.i(TAG, "toggleLike: uri=$trackUriFormatted id=$id nowLiked=$nowLiked")
 
             val callResult = runCatching {
-                if (nowLiked) app.api.saveTracks(id)
-                else app.api.removeSavedTracks(id)
+                if (nowLiked) {
+                    runCatching { app.api.saveToLibrary(trackUriFormatted) }
+                        .getOrElse { app.api.saveTracks(id) }
+                } else {
+                    runCatching { app.api.removeFromLibrary(trackUriFormatted) }
+                        .getOrElse { app.api.removeSavedTracks(id) }
+                }
             }
             callResult.onSuccess {
                 android.util.Log.i(TAG, "toggleLike remote sync OK for $trackUriFormatted (nowLiked=$nowLiked)")
