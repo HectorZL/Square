@@ -2731,18 +2731,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val syncResult = runCatching {
                 if (nowLiked) {
-                    runCatching { container.api.saveToLibrary("spotify:track:$id") }
-                        .recoverCatching { container.api.saveTracks(id) }
-                        .recoverCatching { container.api.saveTracksWithBody(IdsDto(listOf(id))) }
-                        .getOrThrow()
+                    container.api.saveToLibrary("spotify:track:$id")
                 } else {
-                    runCatching { container.api.removeFromLibrary("spotify:track:$id") }
-                        .recoverCatching { container.api.removeSavedTracks(id) }
-                        .recoverCatching { container.api.removeSavedTracksWithBody(IdsDto(listOf(id))) }
-                        .getOrThrow()
+                    container.api.removeFromLibrary("spotify:track:$id")
                 }
             }.onSuccess {
-                android.util.Log.d(TAG, "toggleLike remote sync succeeded for $id (nowLiked=$nowLiked)")
+                android.util.Log.i(TAG, "toggleLike remote sync succeeded for $id (nowLiked=$nowLiked)")
             }.onFailure {
                 android.util.Log.w(TAG, "toggleLike remote sync failed for $id: ${it.message}", it)
                 // Local state is authoritative on this device; do NOT revert likedStore.

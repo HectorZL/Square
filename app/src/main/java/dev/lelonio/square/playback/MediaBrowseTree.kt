@@ -239,9 +239,9 @@ class MediaBrowseTree(
         scope.launch {
             val callResult = runCatching {
                 if (nowLiked) {
-                    app.api.saveTracks(id)
+                    app.api.saveToLibrary("spotify:track:$id")
                 } else {
-                    app.api.removeSavedTracks(id)
+                    app.api.removeFromLibrary("spotify:track:$id")
                 }
             }
             callResult.onSuccess {
