@@ -17,6 +17,7 @@ import dev.lelonio.square.data.Catalog
 import dev.lelonio.square.data.DownloadStore
 import dev.lelonio.square.download.DownloadService
 import dev.lelonio.square.data.AddTracksRequestDto
+import dev.lelonio.square.data.IdsDto
 import dev.lelonio.square.data.RemoveTracksRequestDto
 import dev.lelonio.square.data.TrackUriDto
 import dev.lelonio.square.data.CatalogPlaylist
@@ -2730,11 +2731,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val syncResult = runCatching {
                 if (nowLiked) {
-                    runCatching { container.api.saveToLibrary("spotify:track:$id") }
-                        .getOrElse { container.api.saveTracks(id) }
+                    runCatching { container.api.saveTracks(id) }
+                        .recoverCatching { container.api.saveTracksWithBody(IdsDto(listOf(id))) }
+                        .onSuccess {
+                            runCatching { container.api.saveToLibrary("spotify:track:$id") }
+                        }
+                        .getOrThrow()
                 } else {
-                    runCatching { container.api.removeFromLibrary("spotify:track:$id") }
-                        .getOrElse { container.api.removeSavedTracks(id) }
+                    runCatching { container.api.removeSavedTracks(id) }
+                        .recoverCatching { container.api.removeSavedTracksWithBody(IdsDto(listOf(id))) }
+                        .onSuccess {
+                            runCatching { container.api.removeFromLibrary("spotify:track:$id") }
+                        }
+                        .getOrThrow()
                 }
             }.onSuccess {
                 android.util.Log.d(TAG, "toggleLike remote sync succeeded for $id (nowLiked=$nowLiked)")

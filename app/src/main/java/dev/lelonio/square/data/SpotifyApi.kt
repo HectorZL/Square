@@ -339,7 +339,7 @@ interface SpotifyApi {
     }
 
     /** Unified Spotify Library endpoints (matching fastpotify) */
-    @PUT("v1/me/library")
+    @HTTP(method = "PUT", path = "v1/me/library", hasBody = false)
     suspend fun saveToLibrary(@Query("uris") uris: String)
 
     @DELETE("v1/me/library")
@@ -348,10 +348,15 @@ interface SpotifyApi {
     @GET("v1/me/library/contains")
     suspend fun libraryContains(@Query("uris") uris: String): List<Boolean>
 
-    /** Saves tracks to Liked Songs. */
-    @PUT("v1/me/tracks")
+    /** Saves tracks to Liked Songs (Canciones que te gustan). */
+    @HTTP(method = "PUT", path = "v1/me/tracks", hasBody = false)
     suspend fun saveTracks(
         @Query("ids") ids: String,
+    )
+
+    @PUT("v1/me/tracks")
+    suspend fun saveTracksWithBody(
+        @Body request: IdsDto,
     )
 
     /** And takes them out again. */
@@ -360,7 +365,12 @@ interface SpotifyApi {
         @Query("ids") ids: String,
     )
 
-    @PUT("v1/me/albums")
+    @HTTP(method = "DELETE", path = "v1/me/tracks", hasBody = true)
+    suspend fun removeSavedTracksWithBody(
+        @Body request: IdsDto,
+    )
+
+    @HTTP(method = "PUT", path = "v1/me/albums", hasBody = false)
     suspend fun saveAlbums(
         @Query("ids") ids: String,
     )
