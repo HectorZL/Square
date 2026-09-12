@@ -207,6 +207,7 @@
     <string name="share_whatsapp">WhatsApp</string>
     <string name="share_sms">SMS</string>
     <string name="share_image">Share image</string>
+    <string name="share_status">Stories</string>
     <string name="spotify_links">Spotify links</string>
     <string name="spotify_links_note">Links to tracks, albums, playlists and artists can open here. Android asks you to allow it once, on its own screen.</string>
     <string name="open_by_default">Open by default</string>
