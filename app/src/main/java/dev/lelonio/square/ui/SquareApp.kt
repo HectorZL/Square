@@ -911,6 +911,7 @@ fun SquareApp(
     // Turned off, no clip is ever asked for — which is the point of the switch:
     // it saves the video as well as hiding it.
     val canvasEnabled by preferences.canvasEnabled.collectAsStateWithLifecycle()
+    val lyricsCardEnabled by preferences.lyricsCardEnabled.collectAsStateWithLifecycle()
 
     LaunchedEffect(playback.mediaId, backend, canvasEnabled, offlineNow) {
         val uri = playback.mediaId
@@ -2750,6 +2751,7 @@ fun SquareApp(
                                 // fetch has even begun.
                                 lyricsLoading = playback.mediaId != null &&
                                     lyricsFor != playback.mediaId,
+                                lyricsCardEnabled = lyricsCardEnabled,
                                 credits = credits,
                                 creditsLoading = creditsLoading,
                                 onWantCredits = viewModel::loadCredits,

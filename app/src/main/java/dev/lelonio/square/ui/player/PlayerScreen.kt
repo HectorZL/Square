@@ -210,6 +210,7 @@ fun PlayerScreen(
     queue: List<QueueEntry>,
     lyrics: dev.lelonio.square.data.Lyrics?,
     lyricsLoading: Boolean,
+    lyricsCardEnabled: Boolean = true,
     /** Who made the track, for the credits panel; null until it is asked for. */
     credits: dev.lelonio.square.backend.spotify.SpotifyCredits.Credits?,
     creditsLoading: Boolean,
@@ -1215,26 +1216,6 @@ fun PlayerScreen(
                                     )
                                 }
                                 }
-                                Spacer(Modifier.size(8.dp))
-                                RoundGlassButton(
-                                    backdrop = glassBackdrop,
-                                    size = 40.dp,
-                                    onClick = {
-                                        panel = if (panel == PlayerPanel.LYRICS) {
-                                            PlayerPanel.NONE
-                                        } else {
-                                            karaokeExpand++
-                                            PlayerPanel.LYRICS
-                                        }
-                                    },
-                                ) {
-                                    Icon(
-                                        PhosphorIcons.Regular.TextAlignLeft,
-                                        contentDescription = stringResource(R.string.lyrics),
-                                        tint = panelTint(panel == PlayerPanel.LYRICS),
-                                        modifier = Modifier.size(20.dp),
-                                    )
-                                }
                             }
                         }
 
@@ -1263,7 +1244,7 @@ fun PlayerScreen(
 
                         Spacer(Modifier.height(14.dp))
 
-                        if (panel == PlayerPanel.NONE && lyrics != null && lyrics.lines.isNotEmpty()) {
+                        if (lyricsCardEnabled && panel == PlayerPanel.NONE && lyrics != null && lyrics.lines.isNotEmpty()) {
                             val activeIndex = remember(lyrics, positionMs.value) {
                                 if (!lyrics.synced) 0
                                 else lyrics.lines.indexOfLast { (it.startTimeMs ?: 0L) <= positionMs.value }

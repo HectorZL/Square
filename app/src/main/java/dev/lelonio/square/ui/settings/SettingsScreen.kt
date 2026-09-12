@@ -283,6 +283,11 @@ fun SettingsScreen(
             CanvasSection(backdrop)
         }
 
+        // Lyrics preview card shown below the player controls
+        if (open == SettingsPage.Playback) item("lyrics-card") {
+            LyricsCardSection(backdrop)
+        }
+
         // The effects run on our own output, so this one holds for both backends.
         if (open == SettingsPage.Playback) item("effect-quality") {
             EffectQualitySection()
@@ -659,6 +664,24 @@ private fun AutoplaySection(backdrop: Backdrop) {
             checked = enabled,
             backdrop = backdrop,
             onChange = store::setAutoplayInfinite,
+        )
+    }
+}
+
+@Composable
+private fun LyricsCardSection(backdrop: Backdrop) {
+    val context = LocalContext.current
+    val store = remember(context) {
+        (context.applicationContext as dev.lelonio.square.SquareApplication).preferences
+    }
+    val enabled by store.lyricsCardEnabled.collectAsStateWithLifecycle()
+
+    Section(stringResource(R.string.lyrics)) {
+        DownloadSwitch(
+            label = stringResource(R.string.lyrics_preview_card),
+            checked = enabled,
+            backdrop = backdrop,
+            onChange = store::setLyricsCardEnabled,
         )
     }
 }

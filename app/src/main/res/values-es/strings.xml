@@ -419,4 +419,5 @@
     <string name="trim_silence">Recortar silencio</string>
     <string name="trim_silence_summary">Evita el silencio al final de las canciones durante el fundido</string>
     <string name="mood_mixes">Mixes por estado de ánimo</string>
+    <string name="lyrics_preview_card">Mostrar letra sincronizada abajo</string>
 </resources>
