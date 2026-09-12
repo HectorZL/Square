@@ -14,6 +14,7 @@ import dev.lelonio.square.backend.HomeRow
 import dev.lelonio.square.backend.SearchLabels
 import dev.lelonio.square.R
 import dev.lelonio.square.data.Catalog
+import dev.lelonio.square.data.SpotifyApi
 import dev.lelonio.square.data.DownloadStore
 import dev.lelonio.square.download.DownloadService
 import dev.lelonio.square.data.AddTracksRequestDto
@@ -2731,7 +2732,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val syncResult = runCatching {
                 if (nowLiked) {
-                    container.api.saveToLibrary("spotify:track:$id")
+                    container.api.saveToLibrary("spotify:track:$id", SpotifyApi.EMPTY_BODY)
                 } else {
                     container.api.removeFromLibrary("spotify:track:$id")
                 }
