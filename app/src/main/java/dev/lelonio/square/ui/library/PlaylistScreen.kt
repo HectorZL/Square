@@ -358,7 +358,13 @@ fun PlaylistScreen(
     // that changes, and the one the reference prints here.
     val updated = remember(state.kind, state.tracks) {
         if (state.kind == MainViewModel.DetailKind.PLAYLIST) {
-            state.tracks.mapNotNull { it.addedAt }.maxOrNull()
+            state.tracks.mapNotNull { it.addedAt }
+                .filter { iso ->
+                    runCatching {
+                        java.time.Instant.parse(iso).epochSecond > 1262304000L
+                    }.getOrDefault(false)
+                }
+                .maxOrNull()
         } else {
             null
         }
@@ -1294,9 +1300,26 @@ private fun DetailHeader(
                 )
             }
 
+            val ago = updatedAt?.let { agoOf(it) }.orEmpty()
+            val isDaylist = kind == MainViewModel.DetailKind.PLAYLIST && (
+                name.contains("daylist", ignoreCase = true) ||
+                description.contains("daylist", ignoreCase = true)
+            )
+            val isDailyMix = kind == MainViewModel.DetailKind.PLAYLIST && (
+                name.contains(Regex("(?i)(daily\\s*mix|mix\\s*di[aá]rio|daily\\s*drive|ruta\\s*diaria)")) ||
+                description.contains(Regex("(?i)(daily\\s*mix|mix\\s*di[aá]rio)"))
+            )
+            val isWeekly = kind == MainViewModel.DetailKind.PLAYLIST && (
+                name.contains(Regex("(?i)(discover\\s*weekly|descubrimiento\\s*semanal|release\\s*radar|radar\\s*de\\s*novedades)")) ||
+                description.contains(Regex("(?i)(discover\\s*weekly|descubrimiento\\s*semanal|release\\s*radar|radar\\s*de\\s*novedades)"))
+            )
+
             Text(
                 text = when {
-                    updatedAt != null -> stringResource(R.string.updated_ago, agoOf(updatedAt))
+                    isDaylist -> stringResource(R.string.daylist_schedule)
+                    isDailyMix -> stringResource(R.string.daily_mix_schedule)
+                    isWeekly -> stringResource(R.string.weekly_schedule)
+                    ago.isNotEmpty() -> stringResource(R.string.updated_ago, ago)
                     year.isNotEmpty() -> stringResource(kind.label) + " · " + year
                     else -> stringResource(kind.label)
                 },
@@ -2642,15 +2665,23 @@ private fun EditorialNotes(notes: String) {
  */
 @Composable
 private fun agoOf(iso: String): String {
-    val then = runCatching { java.time.Instant.parse(iso) }.getOrNull()
-        ?: return ""
-    val days = java.time.Duration.between(then, java.time.Instant.now()).toDays()
+    val then = runCatching { java.time.Instant.parse(iso) }
+        .recoverCatching { java.time.OffsetDateTime.parse(iso).toInstant() }
+        .getOrNull() ?: return ""
+    if (then.epochSecond < 1262304000L) return ""
+    val duration = java.time.Duration.between(then, java.time.Instant.now())
+    if (duration.isNegative) return stringResource(R.string.ago_just_now)
+    val minutes = duration.toMinutes()
+    val hours = duration.toHours()
+    val days = duration.toDays()
     return when {
-        days <= 0 -> stringResource(R.string.ago_today)
+        minutes < 1 -> stringResource(R.string.ago_just_now)
+        minutes < 60 -> stringResource(R.string.ago_minutes, minutes.toInt().coerceAtLeast(1))
+        hours < 24 -> stringResource(R.string.ago_hours, hours.toInt().coerceAtLeast(1))
         days < 7 -> stringResource(R.string.ago_days, days)
-        days < 31 -> stringResource(R.string.ago_weeks, days / 7)
-        days < 365 -> stringResource(R.string.ago_months, days / 30)
-        else -> stringResource(R.string.ago_years, days / 365)
+        days < 31 -> stringResource(R.string.ago_weeks, (days / 7).coerceAtLeast(1))
+        days < 365 -> stringResource(R.string.ago_months, (days / 30).coerceAtLeast(1))
+        else -> stringResource(R.string.ago_years, (days / 365).coerceAtLeast(1))
     }
 }
 

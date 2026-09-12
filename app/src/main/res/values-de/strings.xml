@@ -397,11 +397,17 @@
     <string name="songs_and_length">%1$d Titel, %2$s</string>
     <string name="more_notes">MEHR</string>
     <string name="updated_ago">Aktualisiert: %1$s</string>
+    <string name="ago_just_now">gerade eben</string>
+    <string name="ago_minutes">%1$d Min.</string>
+    <string name="ago_hours">%1$d Std.</string>
     <string name="ago_today">heute</string>
     <string name="ago_days">%1$d T</string>
     <string name="ago_weeks">%1$d Wo</string>
     <string name="ago_months">%1$d Mon</string>
     <string name="ago_years">%1$d J</string>
+    <string name="daylist_schedule">Wird alle paar Stunden aktualisiert</string>
+    <string name="daily_mix_schedule">Wird täglich aktualisiert</string>
+    <string name="weekly_schedule">Wird wöchentlich aktualisiert</string>
     <string name="canvas">Canvas</string>
     <string name="canvas_show">Loop-Clips zeigen</string>
     <string name="canvas_note">Das kurze Video, das manche Titel mitbringen. Aus wird es auch nicht geladen.</string>

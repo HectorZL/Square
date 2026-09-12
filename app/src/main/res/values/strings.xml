@@ -423,11 +423,17 @@
     <string name="songs_and_length">%1$d songs, %2$s</string>
     <string name="more_notes">MORE</string>
     <string name="updated_ago">Updated: %1$s</string>
+    <string name="ago_just_now">just now</string>
+    <string name="ago_minutes">%1$d min</string>
+    <string name="ago_hours">%1$d h</string>
     <string name="ago_today">today</string>
     <string name="ago_days">%1$d d</string>
     <string name="ago_weeks">%1$d w</string>
     <string name="ago_months">%1$d mo</string>
     <string name="ago_years">%1$d y</string>
+    <string name="daylist_schedule">Updates every few hours</string>
+    <string name="daily_mix_schedule">Updates daily</string>
+    <string name="weekly_schedule">Updates weekly</string>
     <string name="canvas">Canvas</string>
     <string name="canvas_show">Show looping clips</string>
     <string name="canvas_note">The short video some tracks come with. Off, none is downloaded either.</string>

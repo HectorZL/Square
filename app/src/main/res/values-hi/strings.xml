@@ -412,11 +412,17 @@
     <string name="songs_and_length">%1$d गाने, %2$s</string>
     <string name="more_notes">और</string>
     <string name="updated_ago">अपडेट: %1$s</string>
+    <string name="ago_just_now">अभी</string>
+    <string name="ago_minutes">%1$d मिनट</string>
+    <string name="ago_hours">%1$d घंटे</string>
     <string name="ago_today">आज</string>
     <string name="ago_days">%1$d दि</string>
     <string name="ago_weeks">%1$d सप्ता</string>
     <string name="ago_months">%1$d माह</string>
     <string name="ago_years">%1$d वर्ष</string>
+    <string name="daylist_schedule">हर कुछ घंटों में अपडेट होता है</string>
+    <string name="daily_mix_schedule">रोजाना अपडेट होता है</string>
+    <string name="weekly_schedule">हर हफ्ते अपडेट होता है</string>
     <string name="canvas">Canvas</string>
     <string name="canvas_show">लूप क्लिप दिखाएँ</string>
     <string name="canvas_note">कुछ गानों के साथ आने वाला छोटा वीडियो. बंद होने पर डाउनलोड भी नहीं होता.</string>
