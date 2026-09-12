@@ -2731,18 +2731,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val syncResult = runCatching {
                 if (nowLiked) {
-                    runCatching { container.api.saveTracks(id) }
+                    runCatching { container.api.saveToLibrary("spotify:track:$id") }
+                        .recoverCatching { container.api.saveTracks(id) }
                         .recoverCatching { container.api.saveTracksWithBody(IdsDto(listOf(id))) }
-                        .onSuccess {
-                            runCatching { container.api.saveToLibrary("spotify:track:$id") }
-                        }
                         .getOrThrow()
                 } else {
-                    runCatching { container.api.removeSavedTracks(id) }
+                    runCatching { container.api.removeFromLibrary("spotify:track:$id") }
+                        .recoverCatching { container.api.removeSavedTracks(id) }
                         .recoverCatching { container.api.removeSavedTracksWithBody(IdsDto(listOf(id))) }
-                        .onSuccess {
-                            runCatching { container.api.removeFromLibrary("spotify:track:$id") }
-                        }
                         .getOrThrow()
                 }
             }.onSuccess {
