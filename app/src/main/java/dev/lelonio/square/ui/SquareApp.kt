@@ -668,6 +668,7 @@ fun SquareApp(
     // The open track menu, if any. Held here because the menu is drawn above
     // everything the app puts over its screens.
     var trackMenu by remember { mutableStateOf<TrackMenuRequest?>(null) }
+    var shareCardTrack by remember { mutableStateOf<dev.lelonio.square.data.CatalogTrack?>(null) }
     // The playlist a long press opened the actions for.
     var playlistMenu by remember { mutableStateOf<CatalogPlaylist?>(null) }
     // What the menu may offer for the playlist it is open on. Defaults say yes,
@@ -3197,9 +3198,39 @@ fun SquareApp(
                                 viewModel.toggleTrackDownload(menu.track)
                             }
                         }
+                        TrackSheetAction(stringResource(R.string.radio), PhosphorIcons.Regular.Broadcast) {
+                            val track = menu.track
+                            trackMenu = null
+                            scope.launch {
+                                runCatching {
+                                    val tracks = viewModel.radioFor(track.uri)
+                                    if (tracks.isEmpty()) return@launch
+                                    val station = "spotify:station:track:" + track.uri.substringAfterLast(':')
+                                    val name = radioOf(track.name)
+                                    viewModel.showStation(
+                                        uri = station,
+                                        name = name,
+                                        artworkUrl = track.artworkUrl,
+                                        tracks = tracks,
+                                    )
+                                    if (expand.value > 0f) {
+                                        expand.animateTo(0f, expandSpec)
+                                    }
+                                    if (navController.currentDestination?.route != Routes.PLAYLIST) {
+                                        navController.navigate(Routes.PLAYLIST) { launchSingleTop = true }
+                                    }
+                                    onPlay(tracks, 0, station, true, name, 0L)
+                                }
+                            }
+                        }
                         TrackSheetAction(stringResource(R.string.copy_link), PhosphorIcons.Regular.LinkSimple) {
                             trackMenu = null
                             clipboard.setText(AnnotatedString(menu.track.openLink()))
+                        }
+                        TrackSheetAction(stringResource(R.string.share_card), PhosphorIcons.Regular.Export) {
+                            val track = menu.track
+                            trackMenu = null
+                            shareCardTrack = track
                         }
                         // YouTube only. A Spotify link handed to a downloader
                         // is a link it cannot do anything with, so offering the
@@ -3231,6 +3262,13 @@ fun SquareApp(
                         }
                     }
                 }
+
+                dev.lelonio.square.ui.components.ShareCardBottomSheet(
+                    track = shareCardTrack,
+                    visible = shareCardTrack != null,
+                    backdrop = overlayBackdrop,
+                    onDismiss = { shareCardTrack = null },
+                )
 
                 FriendsPanel(
                     visible = friendsOpen,

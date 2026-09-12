@@ -3321,7 +3321,6 @@ impl PlayerInternal {
         let loader = self.load_track(track_id.clone(), position_ms);
         let loader = Box::pin(
             async move {
-                tokio::time::sleep(LOAD_RETRY_BACKOFF).await;
                 loader.await
             }
             .fuse(),

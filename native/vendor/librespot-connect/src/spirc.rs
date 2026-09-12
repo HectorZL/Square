@@ -1177,10 +1177,15 @@ impl SpircTask {
         );
 
         if let Some(cluster) = cluster_update.cluster.take() {
+            let other_is_playing = !cluster.active_device_id.is_empty()
+                && cluster.player_state.is_playing
+                && !cluster.player_state.is_paused;
             let became_inactive = self.connect_state.is_active()
-                && cluster.active_device_id != self.session.device_id();
+                && !cluster.active_device_id.is_empty()
+                && cluster.active_device_id != self.session.device_id()
+                && other_is_playing;
             if became_inactive {
-                info!("device became inactive");
+                info!("device became inactive: active playback started on {}", cluster.active_device_id);
                 self.handle_disconnect().await?;
                 self.handle_stop();
             } else if self.connect_state.is_active() {

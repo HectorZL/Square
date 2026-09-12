@@ -184,6 +184,11 @@
     <string name="hours_ago">hace %1$d h</string>
     <string name="days_ago">hace %1$d d</string>
     <string name="shared_song">CANCIÓN COMPARTIDA</string>
+    <string name="share">Compartir</string>
+    <string name="share_card">Compartir portada</string>
+    <string name="share_whatsapp">WhatsApp</string>
+    <string name="share_sms">SMS</string>
+    <string name="share_image">Compartir imagen</string>
     <string name="spotify_links">Enlaces de Spotify</string>
     <string name="spotify_links_note">Los enlaces a canciones, álbumes, listas y artistas pueden abrirse aquí. Android lo pregunta una vez, en su propia pantalla.</string>
     <string name="open_by_default">Abrir de forma predeterminada</string>

@@ -338,30 +338,36 @@ interface SpotifyApi {
         val EMPTY_BODY: RequestBody = ByteArray(0).toRequestBody("application/json".toMediaType())
     }
 
+    /** Unified Spotify Library endpoints (matching fastpotify) */
+    @PUT("v1/me/library")
+    suspend fun saveToLibrary(@Query("uris") uris: String)
+
+    @DELETE("v1/me/library")
+    suspend fun removeFromLibrary(@Query("uris") uris: String)
+
+    @GET("v1/me/library/contains")
+    suspend fun libraryContains(@Query("uris") uris: String): List<Boolean>
+
     /** Saves tracks to Liked Songs. */
     @PUT("v1/me/tracks")
     suspend fun saveTracks(
         @Query("ids") ids: String,
-        @Body request: IdsDto = IdsDto(ids.split(",").map { it.trim() }),
     )
 
     /** And takes them out again. */
-    @HTTP(method = "DELETE", path = "v1/me/tracks", hasBody = true)
+    @DELETE("v1/me/tracks")
     suspend fun removeSavedTracks(
         @Query("ids") ids: String,
-        @Body request: IdsDto = IdsDto(ids.split(",").map { it.trim() }),
     )
 
     @PUT("v1/me/albums")
     suspend fun saveAlbums(
         @Query("ids") ids: String,
-        @Body request: IdsDto = IdsDto(ids.split(",").map { it.trim() }),
     )
 
-    @HTTP(method = "DELETE", path = "v1/me/albums", hasBody = true)
+    @DELETE("v1/me/albums")
     suspend fun removeAlbums(
         @Query("ids") ids: String,
-        @Body request: IdsDto = IdsDto(ids.split(",").map { it.trim() }),
     )
 
     @GET("v1/me/albums/contains")

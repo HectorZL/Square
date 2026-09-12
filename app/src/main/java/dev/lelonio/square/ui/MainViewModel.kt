@@ -1159,6 +1159,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
+        val spotifyLink = dev.lelonio.square.data.util.SpotifyLinkParser.parse(query)
+        if (spotifyLink != null) {
+            searchJob = viewModelScope.launch {
+                _search.value = _search.value.copy(loading = true, error = null)
+                runCatching {
+                    resolveSpotifyLink(spotifyLink)
+                }.onSuccess { results ->
+                    currentCoroutineContext().ensureActive()
+                    _search.value = _search.value.copy(
+                        loading = false,
+                        results = results,
+                        needsSetup = false,
+                        loadingMore = false,
+                        exhausted = true,
+                    )
+                }.onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    android.util.Log.e(TAG, "resolve link failed: ${chain(it)}", it)
+                    _search.value = _search.value.copy(loading = false, error = describe(it))
+                }
+            }
+            return
+        }
+
         searchJob = viewModelScope.launch {
             delay(SEARCH_DEBOUNCE_MS)
             _search.value = _search.value.copy(loading = true, error = null)
@@ -1198,6 +1222,64 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
         }
     }
+
+    private suspend fun resolveSpotifyLink(link: dev.lelonio.square.data.util.SpotifyLink): SearchResults =
+        withContext(Dispatchers.IO) {
+            when (link) {
+                is dev.lelonio.square.data.util.SpotifyLink.Track -> {
+                    val trackDto = runCatching { container.api.track(link.id) }.getOrNull()
+                    if (trackDto != null) {
+                        SearchResults(tracks = listOf(trackDto.toCatalogTrack()))
+                    } else {
+                        val tracks = runCatching { Catalog.tracks(listOf(link.uri)) }.getOrDefault(emptyList())
+                        SearchResults(tracks = tracks)
+                    }
+                }
+                is dev.lelonio.square.data.util.SpotifyLink.Album -> {
+                    val tracks = runCatching { container.activeBackend.tracksOf(link.uri) }.getOrDefault(emptyList())
+                    val albumDto = runCatching { container.api.album(link.id) }.getOrNull()
+                    val first = tracks.firstOrNull()
+                    val title = albumDto?.name ?: first?.album ?: string(R.string.album)
+                    val subtitle = albumDto?.artists?.joinToString { it.name }
+                        ?: first?.artist.orEmpty()
+                    val artworkUrl = albumDto?.images?.firstOrNull()?.url ?: first?.artworkUrl
+                    val albumItem = SearchItem(
+                        uri = link.uri,
+                        title = title,
+                        subtitle = subtitle,
+                        artworkUrl = artworkUrl,
+                    )
+                    SearchResults(albums = listOf(albumItem), tracks = tracks)
+                }
+                is dev.lelonio.square.data.util.SpotifyLink.Playlist -> {
+                    val playlistDto = runCatching { container.api.playlist(link.id) }.getOrNull()
+                    val tracks = runCatching { container.activeBackend.tracksOf(link.uri) }.getOrDefault(emptyList())
+                    val title = playlistDto?.name ?: string(R.string.playlist)
+                    val subtitle = playlistDto?.description.orEmpty().ifBlank { string(R.string.playlist) }
+                    val artworkUrl = playlistDto?.images?.firstOrNull()?.url ?: tracks.firstOrNull()?.artworkUrl
+                    val item = SearchItem(
+                        uri = link.uri,
+                        title = title,
+                        subtitle = subtitle,
+                        artworkUrl = artworkUrl,
+                    )
+                    SearchResults(playlists = listOf(item), tracks = tracks)
+                }
+                is dev.lelonio.square.data.util.SpotifyLink.Artist -> {
+                    val artistDto = runCatching { container.api.artist(link.id) }.getOrNull()
+                    val tracks = runCatching { container.activeBackend.tracksOf(link.uri) }.getOrDefault(emptyList())
+                    val title = artistDto?.name ?: tracks.firstOrNull()?.artist ?: string(R.string.artist)
+                    val artworkUrl = artistDto?.images?.firstOrNull()?.url ?: tracks.firstOrNull()?.artworkUrl
+                    val item = SearchItem(
+                        uri = link.uri,
+                        title = title,
+                        subtitle = string(R.string.artist),
+                        artworkUrl = artworkUrl,
+                    )
+                    SearchResults(artists = listOf(item), tracks = tracks)
+                }
+            }
+        }
 
     /**
      * The next page of the same search, appended.
@@ -2643,9 +2725,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val syncResult = runCatching {
                 if (nowLiked) {
-                    container.api.saveTracks(id)
+                    runCatching { container.api.saveToLibrary("spotify:track:$id") }
+                        .getOrElse { container.api.saveTracks(id) }
                 } else {
-                    container.api.removeSavedTracks(id)
+                    runCatching { container.api.removeFromLibrary("spotify:track:$id") }
+                        .getOrElse { container.api.removeSavedTracks(id) }
                 }
             }.onSuccess {
                 android.util.Log.d(TAG, "toggleLike remote sync succeeded for $id (nowLiked=$nowLiked)")
