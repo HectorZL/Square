@@ -155,12 +155,11 @@ object ApiFactory {
 
         private companion object {
             /**
-             * Spotify's back-offs on this client id run to tens of seconds.
-             * Blocking a background OkHttp thread that long is cheaper than
-             * showing an error the user can only answer by tapping retry —
-             * which costs another request against the same quota.
+             * Short back-offs (<=3s) can be waited out safely.
+             * Longer back-offs should not block OkHttp dispatcher threads so that
+             * subsequent requests and fallbacks can proceed without hanging the UI.
              */
-            const val MAX_WAIT_SECONDS = 90L
+            const val MAX_WAIT_SECONDS = 3L
             const val TAG = "SquareApi"
         }
     }

@@ -60,6 +60,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.isActive
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Login gate and library browsing.
@@ -2865,6 +2868,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 size > CONTEXT_CACHE_SIZE
         }
 
+    private val artistPageCache =
+        object : LinkedHashMap<String, ArtistPage>(0, 0.75f, true) {
+            override fun removeEldestEntry(eldest: Map.Entry<String, ArtistPage>) =
+                size > 30
+        }
+
     // ------------------------------------------------------------ downloads
 
     /** What is on the phone, per track; see DownloadStore. */
@@ -3056,6 +3065,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** And when it goes, so does everything behind it. */
     fun detailClosed() {
         pageOnScreen = false
+        playlistJob?.cancel()
+        _playlist.value = PlaylistState()
         clearPageHistory()
     }
 
@@ -3069,7 +3080,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         while (pageStack.isNotEmpty() && pageStack.last().uri == _playlist.value.uri) {
             pageStack.removeLast()
         }
-        val previous = pageStack.removeLastOrNull() ?: return false
+        val previous = pageStack.removeLastOrNull()
+        if (previous == null) {
+            playlistJob?.cancel()
+            return false
+        }
         playlistJob?.cancel()
         _playlist.value = previous
         _hasPreviousPage.value = pageStack.isNotEmpty()
@@ -3157,11 +3172,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             kind = kind,
         )
 
+        val rememberedArtist = if (kind == DetailKind.ARTIST) artistPageCache[playlist.uri] else null
         val remembered = contextCache[playlist.uri]
-        publishPlaylist(base.copy(
-            tracks = remembered?.tracks.orEmpty(),
-            loading = remembered == null,
-        ))
+        if (rememberedArtist != null) {
+            publishPlaylist(base.copy(
+                name = base.name.ifEmpty { rememberedArtist.name.orEmpty() },
+                artworkUrl = base.artworkUrl ?: rememberedArtist.artworkUrl,
+                tracks = rememberedArtist.tracks.take(5),
+                latest = rememberedArtist.latest,
+                albums = rememberedArtist.albums,
+                singles = rememberedArtist.singles,
+                appearsOn = rememberedArtist.appearsOn,
+                artistPlaylists = rememberedArtist.playlists,
+                relatedArtists = rememberedArtist.relatedArtists,
+                verified = true,
+                monthlyListeners = rememberedArtist.monthlyListeners,
+                followers = rememberedArtist.followers,
+                genres = rememberedArtist.genres,
+                notes = base.notes ?: rememberedArtist.biography,
+                loading = false,
+            ))
+        } else {
+            publishPlaylist(base.copy(
+                tracks = remembered?.tracks.orEmpty(),
+                loading = remembered == null,
+            ))
+        }
 
         playlistJob = viewModelScope.launch {
             // Opened by URI alone, from a tap on the player's text: there was no
@@ -3176,7 +3212,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (base.name.isEmpty()) launch {
                 val name = nameOf(playlist.uri) ?: return@launch
                 base = base.copy(name = name)
-                if (_playlist.value.uri == playlist.uri) {
+                if (isActive && _playlist.value.uri == playlist.uri) {
                     _playlist.value = _playlist.value.copy(name = name)
                 }
             }
@@ -3199,7 +3235,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     mine = mine,
                     byline = details.owner.orEmpty(),
                 )
-                if (_playlist.value.uri == playlist.uri) {
+                if (isActive && _playlist.value.uri == playlist.uri) {
                     _playlist.value = _playlist.value.copy(
                         description = text.orEmpty().ifEmpty { _playlist.value.description },
                         mine = mine,
@@ -3211,7 +3247,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // Whether it is already kept, for the button that keeps it.
             if (kind != DetailKind.ARTIST) launch {
                 val kept = savedState(playlist.uri) ?: return@launch
-                if (_playlist.value.uri == playlist.uri) {
+                if (isActive && _playlist.value.uri == playlist.uri) {
                     _playlist.value = _playlist.value.copy(saved = kept)
                 }
                 base = base.copy(saved = kept)
@@ -3225,7 +3261,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (kind == DetailKind.ARTIST || kind == DetailKind.ALBUM) {
                 if (!dev.lelonio.square.playback.OfflineMode.active.value) {
                     base = base.copy(heroPending = true)
-                    if (_playlist.value.uri == playlist.uri) {
+                    if (isActive && _playlist.value.uri == playlist.uri) {
                         _playlist.value = _playlist.value.copy(heroPending = true)
                     }
                 }
@@ -3235,7 +3271,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (base.artworkUrl == null) launch {
                 val art = artworkFor(playlist.uri, kind) ?: return@launch
                 base = base.copy(artworkUrl = art)
-                if (_playlist.value.uri == playlist.uri) {
+                if (isActive && _playlist.value.uri == playlist.uri) {
                     _playlist.value = _playlist.value.copy(artworkUrl = art)
                 }
             }
@@ -3250,17 +3286,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             val cached = entry?.tracks.orEmpty()
 
-            runCatching {
+            try {
                 if (!playlist.uri.startsWith("spotify:")) {
                     // Another backend's context. Resolved in one call rather
                     // than page by page: the Spotify paths below are built
                     // around the Web API's paging and the access point's
                     // per-track lookups, neither of which exists here.
                     val tracks = container.activeBackend.tracksOf(playlist.uri)
-                    publishPlaylist(base.copy(tracks = tracks, loading = false))
+                    if (isActive && _playlist.value.uri == playlist.uri) {
+                        publishPlaylist(base.copy(tracks = tracks, loading = false))
+                    }
                 } else if (kind == DetailKind.ARTIST) {
                     val page = loadArtist(playlist.uri, base.name.ifEmpty { playlist.name })
-                    if (_playlist.value.uri != playlist.uri) return@launch
+                    if (!isActive || _playlist.value.uri != playlist.uri) return@launch
+                    artistPageCache[playlist.uri] = page
                     publishPlaylist(
                         base.copy(
                             name = base.name.ifEmpty { page.name.orEmpty() },
@@ -3288,7 +3327,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     page.latest?.let { release ->
                         launch {
                             val kept = savedState(release.uri) ?: return@launch
-                            if (_playlist.value.uri == playlist.uri) {
+                            if (isActive && _playlist.value.uri == playlist.uri) {
                                 _playlist.value = _playlist.value.copy(latestSaved = kept)
                             }
                         }
@@ -3296,19 +3335,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 } else if (cached.isNotEmpty() && isUnchanged(playlist.uri, entry?.snapshotId)) {
                     // Nothing to do: one small request said the copy on screen
                     // is the current one.
-                    publishPlaylist(base.copy(tracks = cached, loadingMore = false))
+                    if (isActive && _playlist.value.uri == playlist.uri) {
+                        publishPlaylist(base.copy(tracks = cached, loadingMore = false))
+                    }
                 } else {
                     loadContextInto(base, playlist.uri, showProgress = cached.isEmpty())
                 }
-            }
-                .onFailure {
-                    android.util.Log.e(TAG, "detail load failed: ${chain(it)}", it)
-                    // Only when there is nothing to show. A refresh that fails
-                    // over a list already on screen should leave the list.
+            } catch (e: CancellationException) {
+                // Cooperative cancellation: do NOT treat job cancellation as a failure or set error on the screen!
+                throw e
+            } catch (t: Throwable) {
+                android.util.Log.e(TAG, "detail load failed: ${chain(t)}", t)
+                if (isActive && _playlist.value.uri == playlist.uri) {
+                    val hasCachedContent = cached.isNotEmpty() || rememberedArtist != null
+                    val fallbackTracks = cached.ifEmpty { rememberedArtist?.tracks.orEmpty() }
                     publishPlaylist(
-                        if (cached.isEmpty()) base.copy(error = describe(it), loading = false) else base.copy(tracks = cached, loading = false),
+                        if (!hasCachedContent) base.copy(error = describe(t), loading = false) else base.copy(tracks = fallbackTracks, loading = false),
                     )
                 }
+            }
         }
     }
 
@@ -4284,15 +4329,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // Query Gateway search or native context tracks as fallback
             if (tracks.isEmpty() && resolvedName.isNotEmpty()) {
                 val searchRes = runCatching {
-                    container.gateway.search(resolvedName)?.let {
-                        dev.lelonio.square.data.GatewaySearch.parse(
-                            it,
-                            dev.lelonio.square.backend.SearchLabels(
-                                artist = string(R.string.artist),
-                                album = string(R.string.album),
-                                playlist = string(R.string.playlist),
-                            ),
-                        )
+                    withTimeoutOrNull(3000L) {
+                        container.gateway.search(resolvedName)?.let {
+                            dev.lelonio.square.data.GatewaySearch.parse(
+                                it,
+                                dev.lelonio.square.backend.SearchLabels(
+                                    artist = string(R.string.artist),
+                                    album = string(R.string.album),
+                                    playlist = string(R.string.playlist),
+                                ),
+                            )
+                        }
                     }
                 }.getOrNull()
 
@@ -4306,7 +4353,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
             if (tracks.isEmpty()) {
                 val nativeTracks = runCatching {
-                    Catalog.tracks(Catalog.contextTrackUris(uri).take(10))
+                    withTimeoutOrNull(3000L) {
+                        Catalog.tracks(Catalog.contextTrackUris(uri).take(10))
+                    }
                 }.getOrNull()
                 if (!nativeTracks.isNullOrEmpty()) {
                     tracks = nativeTracks.take(5)
@@ -4357,15 +4406,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // If releases were empty, enrich from Gateway search if available
                 if (albumsList.isEmpty() && singlesList.isEmpty() && resolvedName.isNotEmpty()) {
                     val searchRes = runCatching {
-                        container.gateway.search(resolvedName)?.let {
-                            dev.lelonio.square.data.GatewaySearch.parse(
-                                it,
-                                dev.lelonio.square.backend.SearchLabels(
-                                    artist = string(R.string.artist),
-                                    album = string(R.string.album),
-                                    playlist = string(R.string.playlist),
-                                ),
-                            )
+                        withTimeoutOrNull(3000L) {
+                            container.gateway.search(resolvedName)?.let {
+                                dev.lelonio.square.data.GatewaySearch.parse(
+                                    it,
+                                    dev.lelonio.square.backend.SearchLabels(
+                                        artist = string(R.string.artist),
+                                        album = string(R.string.album),
+                                        playlist = string(R.string.playlist),
+                                    ),
+                                )
+                            }
                         }
                     }.getOrNull()
                     if (searchRes != null && searchRes.albums.isNotEmpty()) {
@@ -4392,18 +4443,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         // Secondary fallback: Web player entity (when Web API is not configured or rate-limited)
         val webArtist = runCatching {
-            dev.lelonio.square.data.SpotifyWebArtist.fetch(
-                id,
-                container.sharedHttpClient,
-                getApplication<SquareApplication>().resources,
-            )
+            withTimeoutOrNull(4000L) {
+                dev.lelonio.square.data.SpotifyWebArtist.fetch(
+                    id,
+                    container.sharedHttpClient,
+                    getApplication<SquareApplication>().resources,
+                )
+            }
         }.onFailure {
             android.util.Log.w(TAG, "web artist lookup failed for $id: ${describe(it)}")
         }.getOrNull()
 
         if (webArtist != null && (webArtist.tracks.isNotEmpty() || webArtist.albums.isNotEmpty() || webArtist.singles.isNotEmpty())) {
             val enrichedTracks = runCatching {
-                Catalog.tracks(webArtist.tracks.map { it.uri })
+                withTimeoutOrNull(3000L) {
+                    Catalog.tracks(webArtist.tracks.map { it.uri })
+                }
             }.getOrNull()?.takeIf { it.size == webArtist.tracks.size } ?: webArtist.tracks
 
             val isFollowed = _followedArtists.value.any { it.uri == uri }
@@ -4415,21 +4470,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         // Resolve artist name & metadata if knownName is empty
-        val meta = if (knownName.isEmpty()) fetchArtistMetadata(id) else null
+        val meta = if (knownName.isEmpty()) withTimeoutOrNull(3000L) { fetchArtistMetadata(id) } else null
         val searchName = knownName.ifEmpty { meta?.name.orEmpty() }.ifEmpty { webArtist?.name.orEmpty() }
 
         // Tertiary fallback: Gateway search if web scraper fails
         if (searchName.isNotEmpty()) {
             val searchRes = runCatching {
-                container.gateway.search(searchName)?.let {
-                    dev.lelonio.square.data.GatewaySearch.parse(
-                        it,
-                        dev.lelonio.square.backend.SearchLabels(
-                            artist = string(R.string.artist),
-                            album = string(R.string.album),
-                            playlist = string(R.string.playlist),
-                        ),
-                    )
+                withTimeoutOrNull(3000L) {
+                    container.gateway.search(searchName)?.let {
+                        dev.lelonio.square.data.GatewaySearch.parse(
+                            it,
+                            dev.lelonio.square.backend.SearchLabels(
+                                artist = string(R.string.artist),
+                                album = string(R.string.album),
+                                playlist = string(R.string.playlist),
+                            ),
+                        )
+                    }
                 }
             }.getOrNull()
 
@@ -4725,6 +4782,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * or an empty wrapper, which is how "unknown error" screens happen.
      */
     private fun describe(error: Throwable): String {
+        if (error is java.util.concurrent.CancellationException || error is CancellationException) {
+            return ""
+        }
         if (error is java.net.BindException || error.message?.contains("EADDRINUSE") == true) {
             return string(R.string.cannot_connect)
         }
