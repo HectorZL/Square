@@ -231,8 +231,9 @@ object ApiFactory {
                     }
                 }
 
-                // If successful or an expected response (not 401 Unauthorized, not 403 Forbidden, and not 429 Rate Limited when candidates remain), return it
-                if (response.isSuccessful || (response.code != 401 && response.code != 403 && response.code != 429)) {
+                // If successful or an expected response (not 401 Unauthorized and not 403 Forbidden when candidates remain), return it.
+                // 429 Rate Limited is handled by RateLimitInterceptor waiting out backoff; switching credentials on 429 risks account flagging.
+                if (response.isSuccessful || (response.code != 401 && response.code != 403)) {
                     return response
                 }
 

@@ -93,8 +93,7 @@ object RemoteConnect {
         // this phone it starts playing at once, while the account goes on naming
         // the device it came from until that device lets go. Comparing ids meant
         // the app believed the account and not its own ears.
-        val remotePlaying = playback?.playing == true
-        val elsewhere = NativeBridge.playbackElsewhere && remotePlaying
+        val elsewhere = NativeBridge.playbackElsewhere
         _elsewhere.value = elsewhere
         _playback.value = playback?.takeIf { elsewhere }
         _here.value = playback?.takeIf { !elsewhere && active.isNotEmpty() }

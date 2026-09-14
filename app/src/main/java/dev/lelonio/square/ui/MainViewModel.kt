@@ -1066,13 +1066,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val unsaving = toLibrary && current.liked
 
         if (toLibrary) {
-            toggleLike(trackUri, current.trackTitle)
             _addToPlaylist.value = current.copy(
-                busy = null,
-                done = if (unsaving) null else playlist.name,
-                removed = if (unsaving) playlist.name else null,
-                liked = !unsaving,
+                busy = playlist.uri,
+                done = null,
+                removed = null,
+                error = null,
             )
+            toggleLike(trackUri, current.trackTitle, playlistName = playlist.name)
             return
         }
 
@@ -2180,11 +2180,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setTrimSilence(value: Boolean) = container.preferences.setTrimSilence(value)
 
-    /** Lyrics preview card: whether to show real-time synced lyrics below player controls. */
-    val lyricsCardEnabled: StateFlow<Boolean> get() = container.preferences.lyricsCardEnabled
-
-    fun setLyricsCardEnabled(value: Boolean) = container.preferences.setLyricsCardEnabled(value)
-
     /**
      * Loads a playlist's tracks.
      *
@@ -2671,6 +2666,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         trackTitle: String? = null,
         artist: String? = null,
         artworkUrl: String? = null,
+        playlistName: String? = null,
     ) {
         if (trackUri == null || !trackUri.startsWith("spotify:track:")) return
         val nowLiked = container.likedStore.toggle(trackUri)
@@ -2741,12 +2737,74 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }.onSuccess {
                 android.util.Log.i(TAG, "toggleLike remote sync succeeded for $id (nowLiked=$nowLiked)")
-            }.onFailure {
-                android.util.Log.w(TAG, "toggleLike remote sync failed for $id: ${it.message}", it)
-                // Local state is authoritative on this device; do NOT revert likedStore.
+                if (_addToPlaylist.value.trackUri == trackUri) {
+                    _addToPlaylist.value = _addToPlaylist.value.copy(
+                        busy = null,
+                        done = if (nowLiked) playlistName ?: string(R.string.liked_songs) else null,
+                        removed = if (!nowLiked) playlistName ?: string(R.string.liked_songs) else null,
+                        liked = nowLiked,
+                        error = null,
+                    )
+                }
+            }.onFailure { ex ->
+                android.util.Log.w(TAG, "toggleLike remote sync failed for $id: ${ex.message}", ex)
+                // Revert local state because Spotify call failed
+                container.likedStore.toggle(trackUri)
+                val revertedLiked = !nowLiked
+
+                val forbidden = describe(ex).contains("403") || (ex as? retrofit2.HttpException)?.code() == 403
+                if (forbidden) _webApi.value = _webApi.value.copy(expired = true)
+
+                val errorMsg = when {
+                    forbidden -> string(R.string.permission_needed)
+                    nowLiked -> string(R.string.like_failed)
+                    else -> string(R.string.unlike_failed)
+                }
+
+                if (_addToPlaylist.value.trackUri == trackUri) {
+                    _addToPlaylist.value = _addToPlaylist.value.copy(
+                        busy = null,
+                        done = null,
+                        removed = null,
+                        liked = revertedLiked,
+                        error = errorMsg,
+                    )
+                } else {
+                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                        android.widget.Toast.makeText(getApplication(), errorMsg, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                // Revert Liked Songs in memory and disk cache
+                val colUriRevert = runCatching { NativeBridge.collectionUri() }.getOrNull()?.takeIf { it.isNotEmpty() }
+                val targetUrisRevert = (contextCache.keys.filter { it.endsWith(":collection") } + listOfNotNull(colUriRevert)).toSet()
+                for (cUri in targetUrisRevert) {
+                    val cachedEntry = contextCache[cUri]
+                    if (cachedEntry != null) {
+                        val updatedList = if (revertedLiked) {
+                            listOf(resolvedTrack) + cachedEntry.tracks.filterNot { it.uri == trackUri }
+                        } else {
+                            cachedEntry.tracks.filterNot { it.uri == trackUri }
+                        }
+                        contextCache[cUri] = cachedEntry.copy(tracks = updatedList)
+                        launch {
+                            container.contextCache.write(cUri, updatedList, cachedEntry.snapshotId)
+                        }
+                    }
+                }
+
+                if (_playlist.value.uri?.endsWith(":collection") == true || (_playlist.value.uri != null && _playlist.value.uri == colUriRevert)) {
+                    val currentTracks = _playlist.value.tracks
+                    val updated = if (revertedLiked) {
+                        listOf(resolvedTrack) + currentTracks.filterNot { it.uri == trackUri }
+                    } else {
+                        currentTracks.filterNot { it.uri == trackUri }
+                    }
+                    _playlist.value = _playlist.value.copy(tracks = updated)
+                }
             }
 
-            if (container.downloadSettings.downloadLikedSongs.value) {
+            if (syncResult.isSuccess && container.downloadSettings.downloadLikedSongs.value) {
                 if (nowLiked) {
                     container.downloads.addLiked(resolvedTrack)
                     dev.lelonio.square.download.DownloadService.start(container)

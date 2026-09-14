@@ -248,9 +248,21 @@ class MediaBrowseTree(
                 android.util.Log.i(TAG, "toggleLike remote sync OK for $id (nowLiked=$nowLiked)")
             }.onFailure { ex ->
                 android.util.Log.w(TAG, "toggleLike remote sync failed for $id: ${ex.message}", ex)
+                app.likedStore.toggle(uri)
+                val revertedLiked = !nowLiked
+                session.connectedControllers.forEach { ctrl ->
+                    session.setCustomLayout(
+                        ctrl,
+                        layoutFor(
+                            player,
+                            radioInsteadOfRepeat = session.isMediaNotificationController(ctrl),
+                            isLiked = revertedLiked,
+                        ),
+                    )
+                }
             }
 
-            if (app.downloadSettings.downloadLikedSongs.value) {
+            if (callResult.isSuccess && app.downloadSettings.downloadLikedSongs.value) {
                 if (nowLiked) {
                     val meta = player.currentMediaItem?.mediaMetadata
                     val track = app.downloads.trackOf(uri) ?: CatalogTrack(
