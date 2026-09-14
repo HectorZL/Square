@@ -122,6 +122,11 @@ pub fn elsewhere_active() -> bool {
     if cluster.active_device_id.is_empty() {
         return false;
     }
+    // Only active elsewhere if the cluster is actively playing and not paused
+    let is_playing = cluster.player_state.is_playing && !cluster.player_state.is_paused;
+    if !is_playing {
+        return false;
+    }
     device_id()
         .map(|own| cluster.active_device_id != own)
         .unwrap_or(false)
