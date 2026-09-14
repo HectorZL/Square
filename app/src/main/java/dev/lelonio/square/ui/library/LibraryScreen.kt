@@ -250,9 +250,10 @@ fun LibraryScreen(
                     // of the library, and one nobody has opened yet would
                     // otherwise sit sixtieth among lists they have.
                     .withLocalFilesFirst()
-                    // Liked Songs sits second, right after downloaded music.
-                    // This is the order the listener asked for.
-                    .withLikedSecond()
+                    // Once more at the end, because every row below is keyed
+                    // on its address and a list that holds one twice does not
+                    // draw, it crashes. Spotify can hand the same playlist back
+                    // twice, and a paged list can repeat an item across pages.
                     .distinctBy { it.uri }
             }
 
@@ -704,6 +705,7 @@ private fun ArtistShelf(
     artists: List<dev.lelonio.square.data.SearchItem>,
     onOpen: (dev.lelonio.square.data.SearchItem) -> Unit,
 ) {
+    val uniqueArtists = remember(artists) { artists.distinctBy { it.uri } }
     Column(Modifier.padding(bottom = 18.dp)) {
         Text(
             stringResource(R.string.artists_you_follow),
