@@ -107,6 +107,16 @@ class PreferencesStore(context: Context) {
         }
     }
 
+    private val _lyricsCardEnabled = MutableStateFlow(prefs.getBoolean(KEY_LYRICS_CARD, true))
+
+    /** Whether the real-time synced lyrics preview card is shown below player controls. */
+    val lyricsCardEnabled: StateFlow<Boolean> = _lyricsCardEnabled.asStateFlow()
+
+    fun setLyricsCardEnabled(value: Boolean) {
+        _lyricsCardEnabled.value = value
+        prefs.edit().putBoolean(KEY_LYRICS_CARD, value).apply()
+    }
+
     /**
      * Whether the player was open when the app was last left.
      *
@@ -213,5 +223,6 @@ class PreferencesStore(context: Context) {
         const val KEY_LAST_UPDATE_CHECK = "last_update_check"
         const val KEY_SKIPPED_UPDATE = "skipped_update"
         const val KEY_USER_COUNTRY = "user_country"
+        const val KEY_LYRICS_CARD = "lyrics_card_enabled"
     }
 }

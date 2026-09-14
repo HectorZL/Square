@@ -214,6 +214,7 @@ fun PlayerScreen(
     queue: List<QueueEntry>,
     lyrics: dev.lelonio.square.data.Lyrics?,
     lyricsLoading: Boolean,
+    lyricsCardEnabled: Boolean = true,
     /** Who made the track, for the credits panel; null until it is asked for. */
     credits: dev.lelonio.square.backend.spotify.SpotifyCredits.Credits?,
     creditsLoading: Boolean,
@@ -1279,6 +1280,69 @@ fun PlayerScreen(
 
                         Spacer(Modifier.height(14.dp))
 
+                        if (lyricsCardEnabled && panel == PlayerPanel.NONE && lyrics != null && lyrics.lines.isNotEmpty()) {
+                            val activeIndex = remember(lyrics, positionMs.value) {
+                                if (!lyrics.synced) 0
+                                else lyrics.lines.indexOfLast { (it.startTimeMs ?: 0L) <= positionMs.value }
+                            }
+                            val activeLine = lyrics.lines.getOrNull(activeIndex.coerceAtLeast(0))?.text.orEmpty()
+                            val nextLine = lyrics.lines.getOrNull(activeIndex + 1)?.text.orEmpty()
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(18.dp))
+                                    .clickable {
+                                        karaokeExpand++
+                                        panel = PlayerPanel.LYRICS
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                            ) {
+                                Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.lyrics).uppercase(),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White.copy(alpha = 0.7f),
+                                            letterSpacing = 1.sp,
+                                        )
+                                        Icon(
+                                            imageVector = PhosphorIcons.Regular.TextAlignLeft,
+                                            contentDescription = null,
+                                            tint = Color.White.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = activeLine.ifBlank { "..." },
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (nextLine.isNotBlank()) {
+                                        Spacer(Modifier.height(3.dp))
+                                        Text(
+                                            text = nextLine,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.White.copy(alpha = 0.45f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(10.dp))
+                        }
 
                         PlayerPanelSection(
                             panel = panel,

@@ -2282,6 +2282,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setTrimSilence(value: Boolean) = container.preferences.setTrimSilence(value)
 
+    /** Lyrics preview card: whether to show real-time synced lyrics below player controls. */
+    val lyricsCardEnabled: StateFlow<Boolean> get() = container.preferences.lyricsCardEnabled
+
+    fun setLyricsCardEnabled(value: Boolean) = container.preferences.setLyricsCardEnabled(value)
+
     /**
      * Loads a playlist's tracks.
      *
