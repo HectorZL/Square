@@ -698,6 +698,7 @@ fun SquareApp(
     // The open track menu, if any. Held here because the menu is drawn above
     // everything the app puts over its screens.
     var trackMenu by remember { mutableStateOf<TrackMenuRequest?>(null) }
+    var shareCardTrack by remember { mutableStateOf<dev.lelonio.square.data.CatalogTrack?>(null) }
     // The playlist a long press opened the actions for.
     var playlistMenu by remember { mutableStateOf<CatalogPlaylist?>(null) }
     // What the menu may offer for the playlist it is open on. Defaults say yes,
@@ -3324,6 +3325,11 @@ fun SquareApp(
                             trackMenu = null
                             clipboard.setText(AnnotatedString(menu.track.openLink()))
                         }
+                        TrackSheetAction(stringResource(R.string.share_card), PhosphorIcons.Regular.Export) {
+                            val track = menu.track
+                            trackMenu = null
+                            shareCardTrack = track
+                        }
 
                         // YouTube only. A Spotify link handed to a downloader
                         // is a link it cannot do anything with, so offering the
@@ -3355,6 +3361,13 @@ fun SquareApp(
                         }
                     }
                 }
+
+                dev.lelonio.square.ui.components.ShareCardBottomSheet(
+                    track = shareCardTrack,
+                    visible = shareCardTrack != null,
+                    backdrop = overlayBackdrop,
+                    onDismiss = { shareCardTrack = null },
+                )
 
 
                 FriendsPanel(
