@@ -129,6 +129,19 @@ interface MusicBackend {
     suspend fun homeFeed(cursor: String? = null, params: String? = null): HomeFeed = HomeFeed()
 
     /**
+     * What is new, as the service itself lays it out: its rows, under its own
+     * titles, for the New tab.
+     *
+     * Empty by default. Spotify's tab is assembled elsewhere, out of the
+     * gateway's browse pages; this is for a source whose page can be read as it
+     * comes.
+     */
+    suspend fun newRows(): List<HomeRow> = emptyList()
+
+    /** The same for the Radio tab: the service's own stations and mood lists. */
+    suspend fun radioRows(): List<HomeRow> = emptyList()
+
+    /**
      * The albums the account has saved, for the library's own shelf of them.
      *
      * Apart from [playlists] because the library filters by kind, and a shelf
@@ -169,6 +182,33 @@ interface MusicBackend {
 
     /** Removes it from the account's library. */
     suspend fun deletePlaylist(uri: String): Unit =
+        throw UnsupportedOperationException()
+
+    /**
+     * The lists a track can be added to: the account's own, and the one that
+     * keeps its liked songs where the source files those as a list.
+     *
+     * Not [playlists]: the library also holds lists somebody else made and the
+     * account only saved, and offering those is offering a write that fails.
+     * Empty where nothing can be written.
+     */
+    suspend fun writablePlaylists(): List<CatalogPlaylist> = emptyList()
+
+    /** Whether a track can be taken out of this list by this account. */
+    fun canWriteTo(playlistUri: String): Boolean = canEditPlaylists
+
+    /** Appends a track to one of [writablePlaylists]. */
+    suspend fun addToPlaylist(playlistUri: String, trackUri: String): Unit =
+        throw UnsupportedOperationException()
+
+    /** Takes a track back out of one of them. */
+    suspend fun removeFromPlaylist(playlistUri: String, trackUri: String): Unit =
+        throw UnsupportedOperationException()
+
+    /** Whether the account follows an artist; null when the source cannot say. */
+    suspend fun isFollowing(artistUri: String): Boolean? = null
+
+    suspend fun setFollowing(artistUri: String, follow: Boolean): Unit =
         throw UnsupportedOperationException()
 
     /** Whether this backend's catalogue owns the given URI. */

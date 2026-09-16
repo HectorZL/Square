@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -75,7 +76,7 @@ import dev.lelonio.square.data.CatalogTrack
 import dev.lelonio.square.data.SearchItem
 import dev.lelonio.square.data.sortedByRecentlyOpened
 import dev.lelonio.square.ui.MainViewModel
-import dev.lelonio.square.ui.components.AppIcon
+import dev.lelonio.square.ui.components.AppGlyph
 import dev.lelonio.square.ui.components.AppLockup
 import dev.lelonio.square.ui.components.Artwork
 import dev.lelonio.square.ui.components.SquareWordmark
@@ -96,13 +97,17 @@ import java.util.Calendar
  * and "Tutto" is genuinely the whole thing rather than a fourth view. The
  * sections keep their order in every one of them, so switching never rearranges
  * what stays on screen.
+ *
+ * Each chip is a part of Spotify's own home: what it made for the account,
+ * what the editors put there, and the rows about an artist; see
+ * TabContents.chipOf. There used to be a chip for the library and one for new
+ * releases, which were two other tabs of this app said again on this one.
  */
-private enum class Feed(@StringRes val label: Int) {
-    ALL(R.string.feed_all),
-    FOR_YOU(R.string.feed_for_you),
-    LIBRARY(R.string.library),
-    RELEASES(R.string.feed_releases),
-    ARTISTS(R.string.artists),
+private enum class Feed(@StringRes val label: Int, val chip: dev.lelonio.square.data.TabContents.Chip?) {
+    ALL(R.string.feed_all, null),
+    FOR_YOU(R.string.feed_for_you, dev.lelonio.square.data.TabContents.Chip.FOR_YOU),
+    DISCOVER(R.string.feed_discover, dev.lelonio.square.data.TabContents.Chip.DISCOVER),
+    ARTISTS(R.string.artists, dev.lelonio.square.data.TabContents.Chip.ARTISTS),
 }
 
 /**
@@ -154,6 +159,11 @@ fun HomeScreen(
     onPickYouTubeChip: (dev.lelonio.square.backend.HomeChip?) -> Unit = {},
     /** Called from the bottom of the page: the next shelves, if there are any. */
     onLoadMoreYouTube: () -> Unit = {},
+    /** Whether a Google account is signed in; the page suggests one otherwise. */
+    youtubeSignedIn: Boolean = true,
+    onYouTubeSignIn: () -> Unit = {},
+    /** Signed out of Spotify: play from the other source instead. */
+    onUseYouTube: () -> Unit = {},
     /**
      * Spotify's own personalised shelves, empty when the gateway said nothing.
      *
@@ -177,13 +187,15 @@ fun HomeScreen(
             onOpenSettings = onOpenSettings,
             onPickChip = onPickYouTubeChip,
             onLoadMore = onLoadMoreYouTube,
+            signedIn = youtubeSignedIn,
+            onSignIn = onYouTubeSignIn,
         )
         return
     }
 
     when (state) {
         MainViewModel.UiState.LoggedOut -> Centered {
-            AppIcon(84.dp)
+            AppGlyph(64.dp)
             SquareWordmark(height = 28.dp)
             Text(
                 stringResource(R.string.unofficial_client),
@@ -193,6 +205,7 @@ fun HomeScreen(
                 modifier = Modifier.padding(horizontal = 40.dp),
             )
             GlassAction(stringResource(R.string.log_in_with_spotify), backdrop, onLogIn)
+            dev.lelonio.square.ui.components.SignedOutOptions(onUseYouTube, onOpenSettings)
         }
 
         MainViewModel.UiState.Connecting,
@@ -219,7 +232,16 @@ fun HomeScreen(
             // page that forgets which shelf you were reading is the same
             // complaint as one that forgets where you were in it.
             var filterName by rememberSaveable { mutableStateOf(Feed.ALL.name) }
-            val filter = Feed.entries.firstOrNull { it.name == filterName } ?: Feed.ALL
+            // Only the chips that have something under them, and none at all
+            // when Spotify's home did not answer: the page is then this app's
+            // own sections, which is one view with nothing to filter.
+            val chips = remember(shelves) {
+                listOf(Feed.ALL) + Feed.entries.filter { entry ->
+                    entry.chip != null &&
+                        shelves.any { dev.lelonio.square.data.TabContents.chipOf(it) == entry.chip }
+                }
+            }
+            val filter = chips.firstOrNull { it.name == filterName } ?: Feed.ALL
             // Read once here rather than inside the rows: the label travels
             // with the play so the player can say where the song came from,
             // and that is a plain string by the time it leaves this screen.
@@ -290,6 +312,8 @@ fun HomeScreen(
                     backdrop = backdrop,
                     topPadding = contentPadding.calculateTopPadding(),
                     onFilter = { filterName = it.name },
+                    chips = chips,
+                    showFilters = chips.size > 1,
                     onOpenSettings = onOpenSettings,
                     friends = friends,
                     onOpenFriends = onOpenFriends,
@@ -311,13 +335,14 @@ fun HomeScreen(
                 // page it could not read: what the account plays most, what it
                 // came back to, new releases. Once the real one arrives they
                 // are a second, worse answer to the same question, printed
-                // underneath the first. They keep their own chips, so nothing
-                // is lost — only the pile on the front page.
+                // underneath the first, so they stand in only while there is
+                // no real one; the chips are the real one's.
                 val ownFeed = shelves.isEmpty()
-                val showReleases = (current == Feed.ALL && ownFeed) || current == Feed.RELEASES
-                val showArtists = (current == Feed.ALL && ownFeed) || current == Feed.ARTISTS
-                val showLibrary = (current == Feed.ALL && ownFeed) || current == Feed.LIBRARY
-                val showForYou = (current == Feed.ALL && ownFeed) || current == Feed.FOR_YOU
+                val showOwn = current == Feed.ALL && ownFeed
+                val showReleases = showOwn
+                val showArtists = showOwn
+                val showLibrary = showOwn
+                val showForYou = showOwn
                 val filter = current
 
                 LazyColumn(
@@ -372,9 +397,11 @@ fun HomeScreen(
                 // API round trip a second or two behind, and without a
                 // placeholder the page arrived in two halves and shifted under
                 // whatever was being read.
-                if (filter == Feed.ALL) {
+                run {
                     val allShelves = if (mixShelves.isEmpty()) shelves else (shelves + mixShelves).distinctBy { it.title }
-                    allShelves.forEach { shelf ->
+                    val visible = if (filter == Feed.ALL) allShelves
+                    else allShelves.filter { dev.lelonio.square.data.TabContents.chipOf(it) == filter.chip }
+                    visible.forEach { shelf ->
                         item(contentType = "shelf") { Heading(shelf.title) }
                         item(contentType = "shelf") {
                             Carousel(shelf.items, key = { it.uri }) { entry ->
@@ -414,9 +441,9 @@ fun HomeScreen(
                     }
                 }
 
-                if (showLibrary || (filter == Feed.ALL && shelves.isEmpty())) {
-                    item(contentType = Feed.LIBRARY.name) { Heading(stringResource(R.string.your_playlists)) }
-                    item(contentType = Feed.LIBRARY.name) {
+                if (showLibrary) {
+                    item(contentType = "library") { Heading(stringResource(R.string.your_playlists)) }
+                    item(contentType = "library") {
                         Carousel(
                             playlists.take(if (showLibrary) LIBRARY_SIZE else CAROUSEL_SIZE),
                             key = { it.uri },
@@ -433,7 +460,7 @@ fun HomeScreen(
                 }
 
                 if (showReleases && feed.newReleases.isNotEmpty()) {
-                    item(contentType = Feed.RELEASES.name) { Heading(stringResource(R.string.feed_releases)) }
+                    item(contentType = "releases") { Heading(stringResource(R.string.feed_releases)) }
                     // Cards rather than another row of thumbnails. A carousel
                     // says "here is a list, pick one"; this is meant to be
                     // looked at, so each release gets the width of the page and
@@ -441,7 +468,7 @@ fun HomeScreen(
                     items(
                         feed.newReleases.take(FEED_SIZE),
                         key = { it.uri },
-                        contentType = { Feed.RELEASES.name },
+                        contentType = { "releases" },
                     ) { item ->
                         FeedCard(item) { onOpenItem(item) }
                     }
@@ -495,9 +522,9 @@ fun HomeScreen(
                     }
                 }
 
-                if (recent.isNotEmpty() && filter != Feed.ARTISTS) {
-                    item(contentType = Feed.LIBRARY.name) { Heading(stringResource(R.string.play_again)) }
-                    item(contentType = Feed.LIBRARY.name) {
+                if (recent.isNotEmpty() && filter == Feed.ALL) {
+                    item(contentType = "library") { Heading(stringResource(R.string.play_again)) }
+                    item(contentType = "library") {
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 20.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -562,6 +589,7 @@ private fun Header(
     backdrop: Backdrop,
     topPadding: Dp,
     onFilter: (Feed) -> Unit,
+    chips: List<Feed> = Feed.entries.toList(),
     onOpenSettings: () -> Unit,
     /** Who the account follows and what they play; empty hides the control. */
     friends: List<dev.lelonio.square.data.FriendListen> = emptyList(),
@@ -718,18 +746,18 @@ private fun Header(
 
         // The chips carry the header's bottom margin with them; without them
         // the list would start against the app's own name.
-        if (showFilters) FilterRow(highlighted, backdrop, onFilter) else Spacer(Modifier.height(16.dp))
+        if (showFilters) FilterRow(highlighted, chips, backdrop, onFilter) else Spacer(Modifier.height(16.dp))
     }
 }
 
 @Composable
-private fun FilterRow(selected: Feed, backdrop: Backdrop, onSelect: (Feed) -> Unit) {
+private fun FilterRow(selected: Feed, chips: List<Feed>, backdrop: Backdrop, onSelect: (Feed) -> Unit) {
     LazyRow(
         contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.padding(top = 14.dp, bottom = 10.dp),
     ) {
-        items(Feed.entries.toList(), key = { it.name }) { entry ->
+        items(chips, key = { it.name }) { entry ->
             dev.lelonio.square.ui.components.FilterChip(
                 label = stringResource(entry.label),
                 selected = entry == selected,
@@ -1233,6 +1261,8 @@ private fun YouTubeHome(
     onOpenSettings: () -> Unit,
     onPickChip: (dev.lelonio.square.backend.HomeChip?) -> Unit,
     onLoadMore: () -> Unit,
+    signedIn: Boolean,
+    onSignIn: () -> Unit,
 ) {
     val empty = home.rows.isEmpty() && recent.isEmpty()
     if (empty) {
@@ -1241,7 +1271,7 @@ private fun YouTubeHome(
                 if (home.loading) {
                     CircularProgressIndicator(color = Ink, strokeWidth = 2.dp)
                 } else {
-                    AppIcon(84.dp)
+                    AppGlyph(64.dp)
                     SquareWordmark(height = 28.dp)
                     Text(
                         stringResource(R.string.youtube_home_empty),
@@ -1312,6 +1342,17 @@ private fun YouTubeHome(
                 bottom = contentPadding.calculateBottomPadding(),
             ),
         ) {
+        // First, above the page it would change: signed out, this is the
+        // country's home rather than the listener's.
+        if (!signedIn) {
+            item(key = "sign-in") {
+                dev.lelonio.square.ui.components.SignInHint(
+                    onSignIn = onSignIn,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp),
+                )
+            }
+        }
+
         // YouTube's own filters, where it sent any: each is a page in its own
         // right rather than a sieve over this one.
         if (home.chips.isNotEmpty()) {
@@ -1397,6 +1438,81 @@ private fun YouTubeHome(
                 }
             }
         }
+        }
+    }
+}
+
+/**
+ * One of the other tabs, for a source that lays its own pages out.
+ *
+ * The rows as the service sent them, drawn the way its home page is: a long
+ * shelf of songs as quick picks, a short one as tiles, and everything else as
+ * covers to open. New and Radio are both this page; what differs is which rows
+ * the source was asked for. See MusicBackend.newRows.
+ */
+@Composable
+fun SourceRowsPage(
+    title: String,
+    rows: List<dev.lelonio.square.backend.HomeRow>,
+    loading: Boolean,
+    contentPadding: PaddingValues,
+    onPlay: (List<CatalogTrack>, Int) -> Unit,
+    onOpen: (CatalogPlaylist) -> Unit,
+) {
+    if (rows.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (loading) {
+                CircularProgressIndicator(color = Ink, strokeWidth = 2.dp)
+            } else {
+                Text(
+                    stringResource(R.string.nothing_here),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = InkDim,
+                )
+            }
+        }
+        return
+    }
+
+    LazyColumn(
+        contentPadding = PaddingValues(
+            top = contentPadding.calculateTopPadding() + 8.dp,
+            bottom = contentPadding.calculateBottomPadding() + 24.dp,
+        ),
+    ) {
+        item(key = "title") {
+            Text(
+                title,
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 20.dp, top = 6.dp),
+            )
+        }
+
+        rows.forEachIndexed { index, row ->
+            item(key = "head-$index-${row.title}") { Heading(row.title, row.strapline) }
+            if (row.tracks.isNotEmpty()) {
+                item(key = "tracks-$index-${row.title}") {
+                    if (row.tracks.size >= QUICK_PICK_MINIMUM) {
+                        QuickPicks(row.tracks) { i -> onPlay(row.tracks, i) }
+                    } else {
+                        TrackRow(row.tracks) { i -> onPlay(row.tracks, i) }
+                    }
+                }
+            }
+            if (row.items.isNotEmpty()) {
+                item(key = "items-$index-${row.title}") {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(top = 14.dp),
+                    ) {
+                        items(row.items, key = { it.uri }) { entry ->
+                            PlaylistTile(entry) { onOpen(entry) }
+                        }
+                    }
+                }
+            }
         }
     }
 }

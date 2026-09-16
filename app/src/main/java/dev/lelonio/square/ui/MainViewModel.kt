@@ -167,6 +167,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val appearsOn: List<SearchItem> = emptyList(),
         /** The playlists Spotify built around them, "This Is" first. */
         val artistPlaylists: List<SearchItem> = emptyList(),
+        /** Lists like this one, for the row under a playlist's songs. */
+        val relatedPlaylists: List<SearchItem> = emptyList(),
         /** Fans also like / related artists. */
         val relatedArtists: List<SearchItem> = emptyList(),
         /** Whether the artist is verified. */
@@ -266,8 +268,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var inFlight: Job? = null
     private var playlistJob: Job? = null
 
+    // Signed out is a Spotify state. The other source works without an account
+    // and has its library loading from the start, and reading only Spotify's
+    // login here put a Spotify sign-in button on the YouTube Music library until
+    // the first refresh replaced it, or for good when that refresh never came.
     private val _state = MutableStateFlow<UiState>(
-        if (container.spotifySignedIn) UiState.Connecting else UiState.LoggedOut,
+        when {
+            container.activeBackend.id != BackendId.SPOTIFY -> UiState.Loading
+            container.spotifySignedIn -> UiState.Connecting
+            else -> UiState.LoggedOut
+        },
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
@@ -426,6 +436,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _youtubeHome = MutableStateFlow(YouTubeHomeState())
     val youtubeHome: StateFlow<YouTubeHomeState> = _youtubeHome.asStateFlow()
     private var youtubeHomeJob: Job? = null
+
+    /** One of the other two tabs when the source is not Spotify; see [MusicBackend.newRows]. */
+    data class SourceRowsState(
+        val rows: List<HomeRow> = emptyList(),
+        val loading: Boolean = false,
+    )
+
+    private val _sourceNew = MutableStateFlow(SourceRowsState())
+    val sourceNew: StateFlow<SourceRowsState> = _sourceNew.asStateFlow()
+    private val _sourceRadio = MutableStateFlow(SourceRowsState())
+    val sourceRadio: StateFlow<SourceRowsState> = _sourceRadio.asStateFlow()
+    private var sourceNewJob: Job? = null
+    private var sourceRadioJob: Job? = null
+
+    /**
+     * The New tab for a source that lays its own out. Read once a session: it
+     * is the same page for anyone in the country and moves once a week.
+     */
+    fun loadSourceNew() {
+        if (container.activeBackend.id == BackendId.SPOTIFY) return
+        if (sourceNewJob?.isActive == true || _sourceNew.value.rows.isNotEmpty()) return
+        _sourceNew.value = _sourceNew.value.copy(loading = true)
+        sourceNewJob = viewModelScope.launch {
+            val rows = runCatching { container.activeBackend.newRows() }.getOrDefault(emptyList())
+            _sourceNew.value = SourceRowsState(rows = rows, loading = false)
+        }
+    }
+
+    /** And the Radio tab; see [loadSourceNew]. */
+    fun loadSourceRadio() {
+        if (container.activeBackend.id == BackendId.SPOTIFY) return
+        if (sourceRadioJob?.isActive == true || _sourceRadio.value.rows.isNotEmpty()) return
+        _sourceRadio.value = _sourceRadio.value.copy(loading = true)
+        sourceRadioJob = viewModelScope.launch {
+            val rows = runCatching { container.activeBackend.radioRows() }.getOrDefault(emptyList())
+            _sourceRadio.value = SourceRowsState(rows = rows, loading = false)
+        }
+    }
 
     /**
      * Loads it, once per sign-in state.
@@ -1021,6 +1069,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      *   shows the same picker in its own panel and would otherwise get both.
      */
     fun openAddToPlaylist(trackUri: String?, trackTitle: String, asSheet: Boolean = true) {
+        // The other source writes through its own account, to the lists it
+        // says can be written to; they are asked for as the sheet opens.
+        val backend = container.activeBackend
+        if (backend.id != BackendId.SPOTIFY) {
+            val writable = trackUri != null && backend.owns(trackUri) && backend.canEditPlaylists
+            _addToPlaylist.value = AddToPlaylistState(
+                open = asSheet,
+                trackUri = trackUri,
+                trackTitle = trackTitle,
+                error = if (writable) null else string(R.string.track_cannot_be_added),
+            )
+            if (writable) viewModelScope.launch {
+                val lists = runCatching { backend.writablePlaylists() }
+                    .onFailure { android.util.Log.w(TAG, "writable playlists unavailable: ${describe(it)}") }
+                    .getOrDefault(emptyList())
+                if (_addToPlaylist.value.trackUri == trackUri) {
+                    _addToPlaylist.value = _addToPlaylist.value.copy(playlists = lists)
+                }
+            }
+            return
+        }
         _addToPlaylist.value = AddToPlaylistState(
             open = asSheet,
             trackUri = trackUri,
@@ -1054,6 +1123,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val trackUri = current.trackUri ?: return
         if (current.busy != null) return
         val id = playlist.uri.substringAfterLast(':')
+
+        if (!playlist.uri.startsWith("spotify:")) {
+            _addToPlaylist.value =
+                current.copy(busy = playlist.uri, done = null, removed = null, error = null)
+            viewModelScope.launch {
+                runCatching { container.activeBackend.addToPlaylist(playlist.uri, trackUri) }
+                    .onSuccess {
+                        _addToPlaylist.value = _addToPlaylist.value.copy(busy = null, done = playlist.name)
+                        _inPlaylists.value = _inPlaylists.value + trackUri
+                        invalidateContext(playlist.uri)
+                        if (_playlist.value.uri == playlist.uri) openPlaylist(playlist)
+                    }
+                    .onFailure {
+                        android.util.Log.e(TAG, "add to playlist failed: ${chain(it)}", it)
+                        _addToPlaylist.value = _addToPlaylist.value.copy(
+                            busy = null,
+                            error = string(R.string.add_failed, playlist.name),
+                        )
+                    }
+            }
+            return
+        }
 
         // Liked Songs is in this list like any other, and is the one entry that
         // is not a playlist: it is the account's library, saved to by its own
@@ -1814,6 +1905,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { container.contextCache.clear() }
         _playlist.value = PlaylistState()
         _feed.value = FeedState()
+        // Signed out of Spotify while playing from somewhere else leaves that
+        // source exactly as usable as it was: its library is read again rather
+        // than replaced with a screen asking to sign in to Spotify.
+        if (container.activeBackend.id != BackendId.SPOTIFY) {
+            refresh()
+            return
+        }
         _state.value = UiState.LoggedOut
     }
 
@@ -1827,6 +1925,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _feed.value = FeedState()
         _search.value = SearchState()
         _youtubeHome.value = YouTubeHomeState()
+        sourceNewJob?.cancel()
+        sourceRadioJob?.cancel()
+        _sourceNew.value = SourceRowsState()
+        _sourceRadio.value = SourceRowsState()
         _state.value = UiState.Loading
         if (container.activeBackend.id == BackendId.SPOTIFY && container.spotifySignedIn) {
             PlaybackService.connect(getApplication())
@@ -2244,6 +2346,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 inkHex = state.inkHex ?: current.inkHex,
                 heroAspect = state.heroAspect ?: current.heroAspect,
                 motionUrl = state.motionUrl ?: current.motionUrl,
+                // The row under the songs, for the same reason: the list is
+                // read from a copy of the page taken before the row arrived.
+                relatedPlaylists = state.relatedPlaylists.ifEmpty { current.relatedPlaylists },
                 // Owned by the lookup alone: every other publish carries the
                 // flag's default and would clear the wait a batch of tracks
                 // early, which is the swap this exists to prevent.
@@ -2510,18 +2615,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * one the app can do without. Everything below it is read the old way and
      * does not depend on this at all.
      */
-    val homeShelves: StateFlow<List<HomeShelf>> = _homeShelves.asStateFlow()
+    private val _releasesPage = MutableStateFlow<List<HomeShelf>>(emptyList())
+    private val _chartsPage = MutableStateFlow<List<HomeShelf>>(emptyList())
+    private val _madeForYouPage = MutableStateFlow<List<HomeShelf>>(emptyList())
 
-    private val _newBrowse = MutableStateFlow<List<dev.lelonio.square.data.HomeShelf>>(emptyList())
+    /**
+     * The three tabs, out of the four things Spotify answers.
+     *
+     * Worked out together because they share one rule, that no playlist is on
+     * two of them; see TabContents. Each source updates it as it arrives.
+     */
+    private val tabs: StateFlow<dev.lelonio.square.data.TabContents.Tabs> = combine(
+        _homeShelves,
+        _releasesPage,
+        _chartsPage,
+        _madeForYouPage,
+    ) { home, releases, charts, madeForYou ->
+        dev.lelonio.square.data.TabContents.split(home, releases, charts, madeForYou)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, dev.lelonio.square.data.TabContents.Tabs())
 
-    /** Spotify's own new-releases page, as rows; see SpotifyBrowse. */
-    val newBrowse: StateFlow<List<dev.lelonio.square.data.HomeShelf>> = _newBrowse.asStateFlow()
+    val homeShelves: StateFlow<List<HomeShelf>> = tabs.map { it.home }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    private val _radioBrowse =
-        MutableStateFlow<List<dev.lelonio.square.data.HomeShelf>>(emptyList())
+    /** What is out and what is being played: new releases and the charts. */
+    val newBrowse: StateFlow<List<HomeShelf>> = tabs.map { it.new }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    /** And its "made for you" and charts pages, which is what a radio tab is. */
-    val radioBrowse: StateFlow<List<dev.lelonio.square.data.HomeShelf>> = _radioBrowse.asStateFlow()
+    /** Listening that does not stop: every station and every mix. */
+    val radioBrowse: StateFlow<List<HomeShelf>> = tabs.map { it.radio }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private var browseJob: Job? = null
 
@@ -2546,37 +2668,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * what the catalogue is offering: the releases picked for this listener,
      * the editors' lists, the charts, the mixes.
      *
-     * Whatever the home page is already showing is dropped here, by title: the
-     * two do overlap, and a row that appears twice in one app is worse than a
-     * row that appears once.
+     * What goes on which tab is decided in one place for all three, by what
+     * each playlist is rather than by the title of the row it came in; see
+     * TabContents. Home reads these pages too: the blends and the day's own
+     * list are on "made for you", and the charts are how it knows to leave
+     * them to New.
      */
     fun loadBrowse() {
         if (browseJob?.isActive == true) return
-        if (_newBrowse.value.isNotEmpty() && _radioBrowse.value.isNotEmpty()) return
+        if (_releasesPage.value.isNotEmpty() && _madeForYouPage.value.isNotEmpty()) return
 
         _browseLoading.value = true
         browseJob = viewModelScope.launch {
-            val onHome = _homeShelves.value.map { it.title.lowercase() }.toSet()
             suspend fun page(uri: String) = withContext(Dispatchers.IO) {
                 container.gateway.browsePage(uri)
                     ?.let { dev.lelonio.square.data.SpotifyBrowse.parse(it) }
                     .orEmpty()
-                    .filter { it.title.lowercase() !in onHome }
             }
 
-            val releases = page(dev.lelonio.square.data.SpotifyBrowse.Pages.NEW_RELEASES)
-            if (releases.isNotEmpty()) _newBrowse.value = releases
-
-            // Two pages behind one tab: the mixes made for this listener, and
-            // the charts, which are the other half of what a radio is for.
-            val mixes = page(dev.lelonio.square.data.SpotifyBrowse.Pages.MADE_FOR_YOU)
-            val charts = page(dev.lelonio.square.data.SpotifyBrowse.Pages.CHARTS)
-            val forRadio = (mixes + charts).distinctBy { it.title.lowercase() }
-            if (forRadio.isNotEmpty()) _radioBrowse.value = forRadio
+            page(dev.lelonio.square.data.SpotifyBrowse.Pages.NEW_RELEASES)
+                .takeIf { it.isNotEmpty() }?.let { _releasesPage.value = it }
+            page(dev.lelonio.square.data.SpotifyBrowse.Pages.MADE_FOR_YOU)
+                .takeIf { it.isNotEmpty() }?.let { _madeForYouPage.value = it }
+            page(dev.lelonio.square.data.SpotifyBrowse.Pages.CHARTS)
+                .takeIf { it.isNotEmpty() }?.let { _chartsPage.value = it }
 
             android.util.Log.i(
                 TAG,
-                "browse: ${releases.size} rows for new, ${forRadio.size} for radio",
+                "browse: ${newBrowse.value.size} rows for new, ${radioBrowse.value.size} for radio",
             )
             _browseLoading.value = false
         }
@@ -2613,6 +2732,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (shelves.isNotEmpty()) {
             android.util.Log.i(TAG, "home: ${shelves.size} shelves from the gateway")
             _homeShelves.value = shelves
+            // The browse pages as well: part of Home is on them; see loadBrowse.
+            loadBrowse()
         }
     }
 
@@ -2812,6 +2933,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     container.downloads.removeLiked(trackUri)
                     container.downloads.pruneOrphans().forEach {
                         runCatching { NativeBridge.removeDownload(it) }
+                        runCatching { dev.lelonio.square.download.YouTubeDownloads.forget(getApplication(), it) }
                         dev.lelonio.square.download.DownloadExtras.forget(it)
                     }
                 }
@@ -2932,6 +3054,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 size > 30
         }
 
+    /** The row under each playlist opened this run, so reopening one asks nothing. */
+    private val relatedCache =
+        object : LinkedHashMap<String, List<SearchItem>>(0, 0.75f, true) {
+            override fun removeEldestEntry(eldest: Map.Entry<String, List<SearchItem>>) =
+                size > 30
+        }
     // ------------------------------------------------------------ downloads
 
     /** What is on the phone, per track; see DownloadStore. */
@@ -2976,7 +3104,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // JNI calls to stop the one or two that are running.
                 val inFlight = container.downloads.progress.value.keys.toList()
                 container.downloads.removeOwner(uri)
-                inFlight.forEach { runCatching { NativeBridge.cancelDownload(it) } }
+                inFlight.forEach { runCatching { dev.lelonio.square.download.YouTubeDownloads.stop(it) } }
                 sweepOrphans()
             } else {
                 // The page's own cover, kept like the songs are. It is one
@@ -3015,7 +3143,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val singles = container.downloads.owners.value[DownloadStore.SINGLES].orEmpty()
             if (track.uri in singles) {
                 container.downloads.removeSingle(track.uri)
-                runCatching { NativeBridge.cancelDownload(track.uri) }
+                runCatching { dev.lelonio.square.download.YouTubeDownloads.stop(track.uri) }
                 sweepOrphans()
             } else {
                 container.downloads.addSingle(track)
@@ -3039,7 +3167,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     private suspend fun sweepOrphans() {
         container.downloads.pruneOrphans().forEach {
-            runCatching { NativeBridge.removeDownload(it) }
+            runCatching { dev.lelonio.square.download.YouTubeDownloads.forget(getApplication(), it) }
             dev.lelonio.square.download.DownloadExtras.forget(it)
         }
         // And whatever is left in the extras that no surviving track can
@@ -3056,7 +3184,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun clearDownloads() {
         viewModelScope.launch {
             container.downloads.progress.value.keys.forEach {
-                runCatching { NativeBridge.cancelDownload(it) }
+                runCatching { dev.lelonio.square.download.YouTubeDownloads.stop(it) }
             }
             container.downloads.clearAll()
         }
@@ -3311,6 +3439,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 base = base.copy(saved = kept)
             }
 
+            // Lists like this one, for the row under the songs. Written through
+            // `base` like the rest, and quiet like the rest: the page is whole
+            // without it, and a list Spotify has nothing to pair with simply
+            // ends where its songs do.
+            if (kind == DetailKind.PLAYLIST && playlist.uri.startsWith("spotify:playlist:") &&
+                !dev.lelonio.square.playback.OfflineMode.active.value
+            ) launch {
+                val related = relatedCache[playlist.uri]
+                    ?: container.gateway.relatedPlaylists(playlist.uri)
+                        ?.filter { it.uri != playlist.uri }
+                        ?.also { relatedCache[playlist.uri] = it }
+                    ?: return@launch
+                android.util.Log.i(TAG, "related playlists for ${playlist.uri}: ${related.size}")
+                if (related.isEmpty()) return@launch
+                base = base.copy(relatedPlaylists = related)
+                if (isActive && _playlist.value.uri == playlist.uri) {
+                    _playlist.value = _playlist.value.copy(relatedPlaylists = related)
+                }
+            }
+
             // Apple's own pictures for the page. Deliberately last and
             // deliberately quiet: it is a different catalogue reached over a
             // different network, everything on screen is already correct
@@ -3346,6 +3494,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
             try {
                 if (!playlist.uri.startsWith("spotify:")) {
+                    // Whether the account follows this artist, for the button
+                    // on their page. After the tracks, which read the same
+                    // page and leave the answer behind for this to pick up.
+                    if (kind == DetailKind.ARTIST) launch {
+                        val following = container.activeBackend.isFollowing(playlist.uri)
+                            ?: return@launch
+                        base = base.copy(following = following)
+                        if (isActive && _playlist.value.uri == playlist.uri) {
+                            _playlist.value = _playlist.value.copy(following = following)
+                        }
+                    }
                     // Another backend's context. Resolved in one call rather
                     // than page by page: the Spotify paths below are built
                     // around the Web API's paging and the access point's
@@ -3387,6 +3546,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             val kept = savedState(release.uri) ?: return@launch
                             if (isActive && _playlist.value.uri == playlist.uri) {
                                 _playlist.value = _playlist.value.copy(latestSaved = kept)
+                            }
+                        }
+                    }
+
+                    // The playlists after the page too, and for the same
+                    // reason: "This Is" and the rest are a row near the foot of
+                    // it, and a second request is not worth holding the top for.
+                    // The call that used to fill them went when this page's
+                    // loading was rewritten, and the row went with it.
+                    if (page.playlists.isEmpty()) {
+                        launch {
+                            val lists = artistPlaylistsFor(
+                                playlist.uri,
+                                page.name?.takeIf { it.isNotEmpty() } ?: base.name,
+                            )
+                            if (lists.isEmpty()) return@launch
+                            artistPageCache[playlist.uri] = page.copy(playlists = lists)
+                            if (isActive && _playlist.value.uri == playlist.uri) {
+                                _playlist.value = _playlist.value.copy(artistPlaylists = lists)
                             }
                         }
                     }
@@ -3642,6 +3820,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun removeFromPlaylist(track: CatalogTrack) {
         val uri = _playlist.value.uri ?: return
+        // The other source removes through its own account; the same
+        // optimistic row going and coming back if it refuses.
+        if (!uri.startsWith("spotify:") && container.activeBackend.owns(uri)) {
+            val before = _playlist.value.tracks
+            _playlist.value = _playlist.value.copy(tracks = before.filterNot { it.uri == track.uri })
+            invalidateContext(uri)
+            viewModelScope.launch {
+                runCatching { container.activeBackend.removeFromPlaylist(uri, track.uri) }
+                    .onFailure {
+                        android.util.Log.e(TAG, "remove from playlist failed: ${chain(it)}", it)
+                        if (_playlist.value.uri == uri) {
+                            _playlist.value = _playlist.value.copy(tracks = before)
+                        }
+                    }
+            }
+            return
+        }
         if (!uri.startsWith("spotify:playlist:")) return
 
         val before = _playlist.value.tracks
@@ -3666,6 +3861,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Whether the active source lets the account make and change playlists. */
     val canEditPlaylists: Boolean get() = container.activeBackend.canEditPlaylists
+
+    /** Whether a track can be taken out of this particular list. */
+    fun canRemoveFrom(playlistUri: String?): Boolean {
+        val uri = playlistUri ?: return false
+        return if (uri.startsWith("spotify:")) {
+            container.activeBackend.id == BackendId.SPOTIFY
+        } else {
+            container.activeBackend.owns(uri) && container.activeBackend.canWriteTo(uri)
+        }
+    }
+
+    /** Whether the active source's pages and songs can be kept on the phone. */
+    fun canKeep(uri: String?): Boolean {
+        val it = uri ?: return false
+        val backend = container.activeBackend
+        return backend.owns(it) && when (backend.id) {
+            BackendId.SPOTIFY -> it.startsWith("spotify:")
+            BackendId.YOUTUBE_MUSIC -> true
+        }
+    }
 
     /**
      * Makes a playlist and puts it at the top of the library.
@@ -4621,13 +4836,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * The playlists Spotify built around one artist.
+     * The playlists an artist is in, "This Is" first.
      *
-     * There is no endpoint for this. The desktop client reads it from the
-     * gateway that answers the personalised pages, addressed by a hash of a
-     * query this app does not have, so the way in is the search: "This Is" and
-     * the rest are ordinary public playlists, and what makes them Spotify's own
-     * rather than a stranger's copy is the owner.
+     * Read from the gateway, which answers with the row the desktop client
+     * heads "Featuring"; see [dev.lelonio.square.data.ArtistPlaylists]. The
+     * search below is what is left when the gateway will not answer.
+     */
+    private suspend fun artistPlaylistsFor(uri: String, name: String): List<SearchItem> =
+        container.gateway.artistPlaylists(uri)?.takeIf { it.isNotEmpty() }
+            ?: if (container.webApi.isReady) artistPlaylists(name) else emptyList()
+
+    /**
+     * The playlists Spotify built around one artist, by searching for them.
+     *
+     * The fallback for [artistPlaylistsFor]: "This Is" and the rest are
+     * ordinary public playlists, and what makes them Spotify's own rather than
+     * a stranger's copy is the owner.
      *
      * Named after the artist too, because searching a name returns everything
      * anybody ever titled after them.
@@ -4676,6 +4900,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         _playlist.value = _playlist.value.copy(following = !was)
 
+        // The other source follows through its own account.
+        if (!uri.startsWith("spotify:")) {
+            runCatching { container.activeBackend.setFollowing(uri, !was) }
+                .onSuccess { loadFollowedArtists() }
+                .onFailure {
+                    android.util.Log.e(TAG, "follow failed: ${chain(it)}", it)
+                    if (_playlist.value.uri == uri) {
+                        _playlist.value = _playlist.value.copy(following = was)
+                    }
+                }
+            return@launch
+        }
         if (!container.webApi.isReady) {
             val currentList = _followedArtists.value.toMutableList()
             if (was) {
@@ -4799,6 +5035,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun kindOf(uri: String): DetailKind = when {
         uri.startsWith("spotify:artist:") -> DetailKind.ARTIST
+        // An artist on the other source is an artist too: the page they open on
+        // is the one with the follow button, whichever catalogue they are from.
+        uri.startsWith(dev.lelonio.square.backend.youtube.YouTubeBackend.ARTIST_PREFIX) ->
+            DetailKind.ARTIST
         uri.startsWith("spotify:album:") -> DetailKind.ALBUM
         else -> DetailKind.PLAYLIST
     }

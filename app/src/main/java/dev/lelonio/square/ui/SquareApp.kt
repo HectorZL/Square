@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -247,6 +248,35 @@ private fun inkTintedBy(color: Color): Color {
     hsv[2] = if (dev.lelonio.square.ui.theme.lightPage()) 0.38f else 0.9f
     return androidx.compose.ui.graphics.lerp(Ink, Color(android.graphics.Color.HSVToColor(hsv)), 0.3f)
 }
+
+/**
+ * The lit tab on a page with a colour of its own: that colour, made to read on
+ * the bar.
+ *
+ * Its hue at full strength, where [inkTintedBy] only leans the ink towards it:
+ * the other tabs whisper the page's colour and the one you are on says it.
+ * Bright over the dark film and deep over the light one, like the ink it takes
+ * the place of. A page with no colour to speak of gets that ink.
+ */
+@Composable
+private fun litTabInk(color: Color): Color {
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(color.toArgb(), hsv)
+    if (hsv[1] < 0.06f) return neutralTabInk()
+    hsv[1] = hsv[1].coerceIn(0.55f, 1f)
+    hsv[2] = if (dev.lelonio.square.ui.theme.lightPage()) 0.42f else 1f
+    return Color(android.graphics.Color.HSVToColor(hsv))
+}
+
+/**
+ * The lit tab where the page has no colour: whichever ink reads on the bar's
+ * film, dark on the light one and light on the dark one. The films are the ones
+ * the glass recipe gives the bar on each side; see GlassEffect.
+ */
+@Composable
+private fun neutralTabInk(): Color = dev.lelonio.square.ui.theme.inkOn(
+    if (dev.lelonio.square.ui.theme.lightPage()) Color(0xFFFAFAFA) else Color(0xFF23232A),
+)
 
 /** Roughly what the search circle takes: the row's height, which is its own. */
 private val SearchCircle = 58.dp
@@ -714,13 +744,6 @@ fun SquareApp(
     var clipColumns by remember { mutableStateOf<List<Color>>(emptyList()) }
 
     // What the player's field is made of, worked out once.
-    //
-    // Both the background and the player itself need it: one paints it, and the
-    // other has to know whether what it is writing on is light or dark. It was
-    // computed inside the background's own lambda, where the player could not
-    // see it — and the player was choosing its ink from the phone's setting
-    // instead, which is how a dark Canvas ended up with a near-black progress
-    // bar drawn on it in the light setting.
     val ambientArt = nowPlayingArt?.heroUrl
         ?: nowPlayingArt?.coverUrl
         ?: playback.artworkUrl
@@ -735,18 +758,23 @@ fun SquareApp(
         else -> pageColorFor(ambientAccent)
     }
 
-    // And the ink that field asks for.
+    // The player's ink, which is always the light one.
     //
-    // Damped a little first: the lower half of the player carries a black wash
-    // for legibility, so the colour the transport actually sits on is darker
-    // than the field's own — deciding on the undamped colour left dark ink on
-    // a field that had since been taken down towards black.
-    val playerInk = dev.lelonio.square.ui.theme.inkOn(
-        androidx.compose.ui.graphics.lerp(
-            if (clipColumns.isNotEmpty()) clipColumns.mean() else playerTone,
-            Color.Black,
-            0.22f,
-        ),
+    // It used to be read off the field, and the glass took the opposite film
+    // from it: a pale sleeve turned the whole player into white panes with dark
+    // writing, and the next song could turn it back. The player is dark now
+    // whatever the record and whatever the phone's setting, so the ink is light
+    // and the glass, which still reads it, always takes its dark film.
+    val playerInk = Color(0xFFF7F8FA)
+
+    // And the film on its glass: still dark, and now the record's own dark.
+    // The song's colour at the depth the grey film sat at, see playerFilmTint,
+    // eased from one song to the next rather than cut, like the field under it.
+    val playerFilm by animateColorAsState(
+        targetValue = accent?.let { dev.lelonio.square.ui.player.playerFilmTint(it) }
+            ?: Color(0xFF23232A),
+        animationSpec = tween(PLAYER_FILM_FADE_MS),
+        label = "playerFilm",
     )
 
     // Emptied by the track change itself, not by the answer about the new
@@ -791,6 +819,13 @@ fun SquareApp(
     val backendChosen by preferences.backendChosen.collectAsStateWithLifecycle()
     val backend by preferences.backend.collectAsStateWithLifecycle()
     val youtubeHome by viewModel.youtubeHome.collectAsStateWithLifecycle()
+    val sourceNew by viewModel.sourceNew.collectAsStateWithLifecycle()
+    val sourceRadio by viewModel.sourceRadio.collectAsStateWithLifecycle()
+    // Whether YouTube Music knows whose it is, for the pages that suggest
+    // signing in when it does not.
+    val youtubeAccountName by remember(context) {
+        (context.applicationContext as dev.lelonio.square.SquareApplication).youtubeAccount.accountName
+    }.collectAsStateWithLifecycle()
     // What is kept on the phone. Read here rather than inside the pages that
     // draw it, because the same answer is wanted by the playlist button, the
     // track rows and the track menu, and one collection is one recomposition.
@@ -1058,9 +1093,16 @@ fun SquareApp(
                 // fresh when the mode is entered, and a surface attached to the
                 // one before it shows nothing at all.
                 player?.let {
+                    val key = if (spotifyVideoOn) spotifyVideoGeneration else null
+                    // Fitted, not filled: the system clamps the window's
+                    // shape, and a picture wider than it allows was stretched
+                    // to the window.
                     dev.lelonio.square.ui.player.VideoSurface(
                         it,
-                        attachKey = if (spotifyVideoOn) spotifyVideoGeneration else null,
+                        attachKey = key,
+                        modifier = Modifier.aspectRatio(
+                            dev.lelonio.square.ui.player.rememberVideoRatio(it, key),
+                        ),
                     )
                 }
             }
@@ -1096,7 +1138,14 @@ fun SquareApp(
                     if (spotifyVideoOn) {
                         dev.lelonio.square.backend.spotify.SpotifyVideoMode.skip(forward = false)
                     } else {
-                        player.seekToPreviousMediaItem()
+                        // The track before in the first three seconds, the
+                        // start of this one after, decided here by the position
+                        // on screen. It was always the track before, and the
+                        // engine then made its own three-second decision by its
+                        // own clock: past three seconds it restarted the song
+                        // while the queue moved back, and the app stayed a
+                        // track behind the speaker.
+                        player.seekToPrevious()
                     }
                 },
                 onSeek = { player.seekTo(it) },
@@ -1471,6 +1520,11 @@ fun SquareApp(
                                 },
                                 onPickYouTubeChip = viewModel::selectYouTubeChip,
                                 onLoadMoreYouTube = viewModel::loadMoreYouTubeHome,
+                                youtubeSignedIn = youtubeAccountName != null,
+                                onYouTubeSignIn = { showYouTubeLogin = true },
+                                onUseYouTube = {
+                                    preferences.setBackend(dev.lelonio.square.backend.BackendId.YOUTUBE_MUSIC)
+                                },
                                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                                 friends = friends,
                                 onOpenFriends = {
@@ -1484,6 +1538,24 @@ fun SquareApp(
                         }
 
                         composable(Routes.NEW) {
+                            // A source that lays out its own page of what is new
+                            // gets that page; the one below is built out of
+                            // Spotify's gateway and has nothing to show for any
+                            // other catalogue.
+                            if (backend != dev.lelonio.square.backend.BackendId.SPOTIFY) {
+                                LaunchedEffect(backend) { viewModel.loadSourceNew() }
+                                dev.lelonio.square.ui.home.SourceRowsPage(
+                                    title = newLabel,
+                                    rows = sourceNew.rows,
+                                    loading = sourceNew.loading,
+                                    contentPadding = listPadding,
+                                    onPlay = { tracks, index ->
+                                        onPlay(tracks, index, null, false, newLabel, 0L)
+                                    },
+                                    onOpen = { navController.openPlaylist(viewModel, it) },
+                                )
+                                return@composable
+                            }
                             LaunchedEffect(Unit) {
                                 viewModel.loadNewPage()
                                 viewModel.loadBrowse()
@@ -1513,6 +1585,21 @@ fun SquareApp(
                         }
 
                         composable(Routes.RADIO) {
+                            // The same for the stations; see the New tab above.
+                            if (backend != dev.lelonio.square.backend.BackendId.SPOTIFY) {
+                                LaunchedEffect(backend) { viewModel.loadSourceRadio() }
+                                dev.lelonio.square.ui.home.SourceRowsPage(
+                                    title = stringResource(R.string.tab_radio),
+                                    rows = sourceRadio.rows,
+                                    loading = sourceRadio.loading,
+                                    contentPadding = listPadding,
+                                    onPlay = { tracks, index ->
+                                        onPlay(tracks, index, null, false, radioLabel, 0L)
+                                    },
+                                    onOpen = { navController.openPlaylist(viewModel, it) },
+                                )
+                                return@composable
+                            }
                             LaunchedEffect(Unit) { viewModel.loadBrowse() }
                             RadioScreen(
                                 seeds = radioSeeds,
@@ -1582,6 +1669,7 @@ fun SquareApp(
                                 },
                                 history = searchTrail,
                                 onClearHistory = viewModel::clearSearchHistory,
+                                onRemoveHistory = { uri -> viewModel.forgetSearchPlay(uri) },
                                 offline = offlineNow,
                                 onEnqueue = onEnqueue,
                                 onTrackMenu = { track ->
@@ -1623,6 +1711,13 @@ fun SquareApp(
                                 artists = followedArtists,
                                 albums = savedAlbums,
                                 onRetryOnline = viewModel::retryOnline,
+                                signInHint = backend == dev.lelonio.square.backend.BackendId.YOUTUBE_MUSIC &&
+                                    youtubeAccountName == null,
+                                onSignIn = { showYouTubeLogin = true },
+                                onUseYouTube = {
+                                    preferences.setBackend(dev.lelonio.square.backend.BackendId.YOUTUBE_MUSIC)
+                                },
+                                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                                 onOpenArtist = { artist ->
                                     viewModel.openContext(
                                         artist.uri,
@@ -1781,14 +1876,13 @@ fun SquareApp(
                                         trackMenu = TrackMenuRequest(
                                             track = track,
                                             // Only a playlist can have
-                                            // something taken out of it.
-                                            // Taking a track out goes through
-                                            // the Spotify Web API, so only a
-                                            // Spotify playlist can offer it.
+                                            // something taken out of it, and
+                                            // only one the account can write
+                                            // to: on YouTube Music the library
+                                            // also holds lists it only saved.
                                             removable = page.kind ==
                                                 MainViewModel.DetailKind.PLAYLIST &&
-                                                backend ==
-                                                dev.lelonio.square.backend.BackendId.SPOTIFY,
+                                                viewModel.canRemoveFrom(page.uri),
                                         )
                                     },
                                     storedSort = trackSort,
@@ -1806,14 +1900,12 @@ fun SquareApp(
                                         ?.let { downloadOwners[it] }
                                         ?: dev.lelonio.square.data.OwnerState.None,
                                     onToggleDownload = { viewModel.toggleDownload(page) },
-                                    // The store belongs to the librespot engine,
-                                    // so only Spotify pages can be kept — and
-                                    // with no network the button would only ever
-                                    // queue work that cannot start.
-                                    canDownload = backend ==
-                                        dev.lelonio.square.backend.BackendId.SPOTIFY &&
-                                        page.uri?.startsWith("spotify:") == true &&
-                                        !offlineNow,
+                                    // Pages of the source that is playing, on
+                                    // either source now: Spotify's through its
+                                    // engine, YouTube Music's as files of their
+                                    // own. With no network the button would only
+                                    // ever queue work that cannot start.
+                                    canDownload = viewModel.canKeep(page.uri) && !offlineNow,
                                     onToggleFollow = viewModel::toggleFollowArtist,
                                     onToggleLatestSaved = viewModel::toggleLatestSaved,
                                     onToggleSaved = viewModel::toggleSaved,
@@ -2005,7 +2097,7 @@ fun SquareApp(
                                 },
                                 onPrevious = {
                                     if (remote != null) onRemote(RemoteConnect::previous)
-                                    else player?.seekToPreviousMediaItem()
+                                    else player?.seekToPrevious()
                                 },
                                 onSeek = { positionMillis -> player?.seekTo(positionMillis) },
                             )
@@ -2041,26 +2133,11 @@ fun SquareApp(
                     // from the screen rather than fixed: four labels and a circle
                     // on a narrow phone is exactly where a constant starts
                     // pushing the last tab off the end.
-                    // The colour the current tab is drawn in: the artwork's
-                    // own, straight from the palette rather than through the
-                    // theme.
-                    //
-                    // The theme's primary is that colour after the material
-                    // scheme has had it — pulled toward its own tonal palette,
-                    // which is what made the lit tab a near-relative of the
-                    // cover rather than the cover's colour. This is the same
-                    // value the pages are tinted from, at full strength, which
-                    // is how the reference draws the place you are.
-                    // The app's accent, which is the cover's own: the theme is
-                    // seeded from it through ArtworkColor and every switch,
-                    // slider and progress bar in the app is drawn in it.
-                    //
-                    // This used to read the palette a second time here, and off
-                    // the *other* catalogue's picture — so the bar could be
-                    // violet while the rest of the app was orange, on the same
-                    // song. One accent, taken from where the app already keeps
-                    // it.
-                    val tabAccent = MaterialTheme.colorScheme.primary
+                    // The app's accent, which is the playing cover's own. Only
+                    // the faint tint of the other tabs comes from it now; see
+                    // barInk below.
+                    val songAccent = MaterialTheme.colorScheme.primary
+
 
                     // And the white the rest of the bar is drawn in: never a
                     // pure one. The reference tints its icons with the colour of
@@ -2079,16 +2156,31 @@ fun SquareApp(
                     val onDetail = route == Routes.PLAYLIST
                     val detailArt = playlist.heroUrl ?: playlist.coverUrl ?: playlist.artworkUrl
                     val detailAccent by rememberArtworkColor(detailArt.takeIf { onDetail })
-                    val surfaceTint = when {
-                        // Off a detail page the bar is tinted by what is
-                        // playing, which is what those pages are tinted by too.
-                        !onDetail -> tabAccent
+                    // The colour of the page under the bar, where it has one: a
+                    // record's own, the catalogue's where there is one and the
+                    // picture's where there is not.
+                    val pageTint: Color? = when {
+                        !onDetail -> null
                         playlist.tintHex != null -> runCatching {
                             Color(android.graphics.Color.parseColor("#${playlist.tintHex}"))
-                        }.getOrDefault(tabAccent)
-                        else -> detailAccent ?: tabAccent
+                        }.getOrNull()
+                        else -> detailAccent
                     }
+                    // Off a detail page the bar is tinted by what is playing,
+                    // which is what those pages are tinted by too.
+                    val surfaceTint = pageTint ?: songAccent
                     val barInk = inkTintedBy(surfaceTint)
+
+                    // The colour the current tab is drawn in: the page's, never
+                    // the song's.
+                    //
+                    // It was the accent, so the one mark that says where you
+                    // are changed colour with every song, and on a green list
+                    // with a grey record playing it came out grey. On a page
+                    // with a colour of its own it is that colour, at the
+                    // strength the other tabs only lean towards; on the neutral
+                    // pages it is plain ink, chosen by the film it sits on.
+                    val tabAccent = pageTint?.let { litTabInk(it) } ?: neutralTabInk()
 
                     // What the lit slot is filled with. The listener's own glass
                     // settings still own it — the puck was a surface of this
@@ -2629,12 +2721,22 @@ fun SquareApp(
                               dev.lelonio.square.ui.player.LocalGlassEnabled provides
                                   (glassConfig.playerEnabled &&
                                       dev.lelonio.square.ui.player.LocalGlassEnabled.current),
-                              // Everything on this screen writes on the field,
-                              // and the field is the record — not the phone's
-                              // setting. The glass reads this too and takes the
-                              // opposite film; see GlassEffect.
+                              // Light ink on every surface of the player, and
+                              // through it the dark film on its glass; see
+                              // playerInk above and GlassEffect.
                               dev.lelonio.square.ui.theme.LocalInkOverride provides playerInk,
                               androidx.compose.material3.LocalContentColor provides playerInk,
+                              // The record's film, to the panes that draw their
+                              // own and, through the config, to the ones the
+                              // glass recipe fills. A colour set by hand in the
+                              // settings still wins, as it does everywhere.
+                              dev.lelonio.square.ui.player.LocalPlayerFilm provides
+                                  playerFilm.copy(alpha = 0.5f),
+                              dev.lelonio.square.ui.glass.LocalGlassEffectConfig provides
+                                  dev.lelonio.square.ui.glass.LocalGlassEffectConfig.current.let {
+                                      if (it.surfaceTintColor.isSpecified) it
+                                      else it.copy(surfaceTintColor = playerFilm)
+                                  },
                           ) {
                             PlayerScreen(
                                 state = playerState,
@@ -2711,7 +2813,7 @@ fun SquareApp(
                                         dev.lelonio.square.backend.spotify
                                             .SpotifyVideoMode.skip(forward = false)
                                     } else {
-                                        player?.seekToPreviousMediaItem()
+                                        player?.seekToPrevious()
                                     }
                                 },
                                 onSeek = { target ->
@@ -2882,7 +2984,15 @@ fun SquareApp(
                                         asSheet = false,
                                     )
                                 },
-                                onToggleLike = playback.mediaId?.let { uri ->
+                                // The heart is Spotify's library. On the other
+                                // source the button is a plus instead and opens
+                                // the lists, liked songs among them.
+                                onToggleLike = playback.mediaId
+                                    ?.takeIf {
+                                        it.startsWith("spotify:") &&
+                                            backend == dev.lelonio.square.backend.BackendId.SPOTIFY
+                                    }
+                                    ?.let { uri ->
                                     {
                                         viewModel.toggleLike(
                                             uri,
@@ -2895,7 +3005,9 @@ fun SquareApp(
                                 addToPlaylist = addToPlaylist,
                                 onPickPlaylist = viewModel::addToPlaylist,
                                 playlistEditAvailable =
-                                    backend == dev.lelonio.square.backend.BackendId.SPOTIFY,
+                                    backend == dev.lelonio.square.backend.BackendId.SPOTIFY ||
+                                        (viewModel.canEditPlaylists && !offlineNow &&
+                                            playback.mediaId?.startsWith("ytmusic:track:") == true),
                                 onWatchVideo = player
                                     ?.takeIf {
                                         // A video is streamed, so there is
@@ -2994,17 +3106,16 @@ fun SquareApp(
                         // three you press while listening. This is a decision
                         // about storage, which is what a menu is for.
                         //
-                        // The store belongs to the librespot engine, so only
-                        // Spotify pages can be kept — and with no network the
-                        // entry would only ever queue work that cannot start.
+                        // Pages of the source that is playing can be kept,
+                        // and with no network the entry would only ever queue
+                        // work that cannot start.
                         //
                         // Offered only for the page that is open, because
                         // keeping one means keeping its songs and the track list
                         // is what this reads: the same sheet opens over a
                         // library row, where there is a name and nothing to
                         // fetch yet.
-                        val keepable = backend == dev.lelonio.square.backend.BackendId.SPOTIFY &&
-                            shownPlaylist.uri.startsWith("spotify:") &&
+                        val keepable = viewModel.canKeep(shownPlaylist.uri) &&
                             playlist.uri == shownPlaylist.uri &&
                             playlist.tracks.isNotEmpty() &&
                             // An artist page has no keep button of its own: its
@@ -3143,10 +3254,12 @@ fun SquareApp(
                             trackMenu = null
                             onEnqueue(menu.track)
                         }
-                        // Writing to a playlist is the Spotify Web API's; on
-                        // another source, or with no network, the entry would
-                        // only ever fail.
-                        if (backend == dev.lelonio.square.backend.BackendId.SPOTIFY && !offlineNow) {
+                        // Writing to a playlist needs the account: Spotify's
+                        // Web API, or a signed-in YouTube Music. With no
+                        // network the entry would only ever fail.
+                        if ((backend == dev.lelonio.square.backend.BackendId.SPOTIFY ||
+                                viewModel.canEditPlaylists) && !offlineNow
+                        ) {
                             TrackSheetAction(stringResource(R.string.add_to_playlist), PhosphorIcons.Regular.Plus) {
                                 trackMenu = null
                                 viewModel.openAddToPlaylist(menu.track.uri, menu.track.name)
@@ -3169,8 +3282,7 @@ fun SquareApp(
                             }
                         }
                         // Keeping one song, as opposed to keeping the list it
-                        // came from. Spotify only: this is the engine's own
-                        // store, and the other backend streams from elsewhere.
+                        // came from, on whichever source it belongs to.
                         // Removing is offered only for a song kept on its
                         // own. One that is here because a playlist wants it
                         // cannot be let go of from this menu — the file is
@@ -3179,7 +3291,7 @@ fun SquareApp(
                         // worse than no row.
                         val onItsOwn = menu.track.uri in downloadSingles
                         val here = menu.track.uri in downloadedFiles
-                        if (backend == dev.lelonio.square.backend.BackendId.SPOTIFY &&
+                        if (viewModel.canKeep(menu.track.uri) &&
                             (onItsOwn || (!here && !offlineNow))
                         ) {
                             val kept = onItsOwn
@@ -3339,7 +3451,7 @@ fun SquareApp(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
-                            dev.lelonio.square.ui.components.AppIcon(84.dp)
+                            dev.lelonio.square.ui.components.AppGlyph(64.dp)
                             dev.lelonio.square.ui.components.SquareWordmark(height = 28.dp)
                             // Which source is being opened, named and marked:
                             // the whole point of the wait is that the app is
@@ -3424,7 +3536,6 @@ fun SquareApp(
                     OnboardingScreen(
                         state = state,
                         webApi = webApi,
-                        backdrop = artBackdrop,
                         onLogIn = viewModel::logIn,
                         onClientIdChange = viewModel::onWebApiClientIdChange,
                         onConnectWebApi = { viewModel.connectWebApi() },
@@ -3635,15 +3746,16 @@ private fun NavHostController.openPlaylist(viewModel: MainViewModel, playlist: C
  * stack forever and the system back button would walk the entire history.
  */
 /**
- * What the player says the track is coming from: "Playlist · Estate 2025".
+ * What the player says the track is coming from: "Estate 2025".
  *
- * The kind first, because the name alone reads as a title and the two are worth
- * telling apart at a glance while a cover is filling the screen.
+ * The name alone. The kind in front of it took the room a long name needs at
+ * the top of the player, and the name is what tells one list from another;
+ * the kind is what shows when there is no name to give.
  */
 @Composable
 private fun MainViewModel.PlaylistState.sourceLabel(): String {
     val kindName = stringResource(kind.label)
-    return if (name.isBlank()) kindName else "$kindName · $name"
+    return name.ifBlank { kindName }
 }
 
 private fun NavHostController.switchTab(route: String) {
@@ -3896,12 +4008,5 @@ private suspend fun awaitAudible(
 /** How long the extras wait for the song; see [awaitAudible]. */
 private const val AUDIBLE_TIMEOUT_MS = 5_000L
 
-/** The one colour a row of sampled columns amounts to. */
-private fun List<Color>.mean(): Color {
-    if (isEmpty()) return Color.Black
-    return Color(
-        red = sumOf { it.red.toDouble() }.toFloat() / size,
-        green = sumOf { it.green.toDouble() }.toFloat() / size,
-        blue = sumOf { it.blue.toDouble() }.toFloat() / size,
-    )
-}
+/** How long the player's glass takes to become the next song's colour. */
+private const val PLAYER_FILM_FADE_MS = 700
